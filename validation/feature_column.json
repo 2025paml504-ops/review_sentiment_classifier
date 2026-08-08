@@ -1,0 +1,13 @@
+{
+  "columns": {
+    "Negative_Review": "string",
+    "Positive_Review": "string",
+    "full_review": "string",
+    "clean_review": "string",
+    "tokens": "string",
+    "Review_Total_Negative_Word_Counts": "integer",
+    "Review_Total_Positive_Word_Counts": "integer",
+    "Reviewer_Score": "float",
+    "sentiment": "string"
+  }
+}

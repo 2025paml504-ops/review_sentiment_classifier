@@ -1,0 +1,33 @@
+stages:
+  build_features:
+    cmd: python -m features.build_features
+    deps:
+      - features/build_features.py
+      - data/raw/Hotel_Reviews.csv
+    outs:
+      - data/interim/features_clean.csv
+
+  validate:
+    cmd: python -m validation.validate_data
+    deps:
+      - data/interim/features_clean.csv
+      - validation/validate_data.py
+      - validation/feature_column.json
+    always_changed: true
+
+  feature_store:
+    cmd: python -m feature_store.feature_store
+    deps:
+      - data/interim/features_clean.csv
+      - feature_store/feature_store.py
+    outs:
+      - feature_store/feature_store.db
+
+  vectorize:
+    cmd: python -m features.vectorize
+    deps:
+      - feature_store/feature_store.db
+      - features/vectorize.py
+    outs:
+      - data/processed/train_v1.csv
+      - model_store/tfidf_vectorizer_v1.pkl

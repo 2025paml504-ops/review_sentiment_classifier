@@ -1,0 +1,69 @@
+schema: '2.0'
+stages:
+  build_features:
+    cmd: python -m features.build_features
+    deps:
+    - path: data/raw/Hotel_Reviews.csv
+      hash: md5
+      md5: dd2ca0ed1898c73df47bfb679b35adb7
+      size: 238154765
+    - path: features/build_features.py
+      hash: md5
+      md5: bfed8a717fa81c550698e83bf2b4aaca
+      size: 3820
+    outs:
+    - path: data/interim/features_clean.csv
+      hash: md5
+      md5: 964cb2e85e136cc7550b48fc46c919f7
+      size: 481455046
+  validate:
+    cmd: python -m validation.validate_data
+    deps:
+    - path: data/interim/features_clean.csv
+      hash: md5
+      md5: 964cb2e85e136cc7550b48fc46c919f7
+      size: 481455046
+    - path: validation/feature_column.json
+      hash: md5
+      md5: 13437a1491a3869ae922df8309b34263
+      size: 333
+    - path: validation/validate_data.py
+      hash: md5
+      md5: 25fc67f94f3627def5fbfacff23df472
+      size: 5279
+  feature_store:
+    cmd: python -m feature_store.feature_store
+    deps:
+    - path: data/interim/features_clean.csv
+      hash: md5
+      md5: 964cb2e85e136cc7550b48fc46c919f7
+      size: 481455046
+    - path: feature_store/feature_store.py
+      hash: md5
+      md5: 226c58242ae1e9758482208171f3b209
+      size: 1518
+    outs:
+    - path: feature_store/feature_store.db
+      hash: md5
+      md5: 0b14d210a8035d8ec44067dca629de69
+      size: 541659136
+  vectorize:
+    cmd: python -m features.vectorize
+    deps:
+    - path: feature_store/feature_store.db
+      hash: md5
+      md5: 0b14d210a8035d8ec44067dca629de69
+      size: 541659136
+    - path: features/vectorize.py
+      hash: md5
+      md5: 83aafe3631855ec5284d68029b2d60ad
+      size: 2391
+    outs:
+    - path: data/processed/train_v1.csv
+      hash: md5
+      md5: 5c8bc87f7e2ed72731b005ae2aa76eb8
+      size: 79117068
+    - path: model_store/tfidf_vectorizer_v1.pkl
+      hash: md5
+      md5: d53380ab0fa764b9fe19f48af4283820
+      size: 787484
