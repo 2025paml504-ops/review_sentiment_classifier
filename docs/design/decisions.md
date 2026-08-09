@@ -14,18 +14,26 @@ gives the **context**, the **decision**, the **rationale**, and the
 Booking dataset inserts placeholder strings (`No Positive` / `No Negative`) when
 a half is blank.
 
-**Decision.** In `features/build_features.py`: lowercase → strip the
+**Decision.** In `features/build_features.py`: lowercase → normalize curly
+apostrophes (`U+2019`) to ASCII → expand contractions → strip the
 `no positive` / `no negative` placeholder phrases → replace every non-letter
 (digits, punctuation, specials) with a space → collapse whitespace → tokenize by
-whitespace split.
+whitespace split → attach negators (see §10).
 
 **Rationale.** Dependency-light (stdlib `re` only), keeps clean alphabetic tokens
 that suit a bag-of-words / TF-IDF model, and removes dataset-artifact noise that
-would otherwise become features.
+would otherwise become features. Contractions are expanded **before** the
+non-letter strip, otherwise `don't` would shatter into `don` + `t` and the
+negation would be lost.
 
-**Alternatives.** Stopword removal — skipped (adds an NLTK dependency/download;
-TF-IDF's `idf` already down-weights common words). Lemmatization/stemming —
-deferred as unnecessary for a first baseline.
+Rows are de-duplicated before cleaning (§11), and rows whose `full_review` or
+`clean_review` comes out empty are dropped.
+
+**Alternatives.** Stopword-list removal — skipped as a separate step (adds an
+NLTK dependency/download; TF-IDF's `idf` already down-weights common words).
+`NEGATION_SKIP_WORDS` is not a stopword list: those words stay as tokens, they
+are only excluded from negator merging (§10). Lemmatization/stemming — deferred
+as unnecessary for a first baseline.
 
 ## 2. Combine positive + negative into `full_review`
 
@@ -128,3 +136,47 @@ git commit pins an exact dataset version.
 
 **Alternatives.** Filename-only `_vN` convention — human-readable but not
 reproducible or content-addressed; kept as a *label* layered on top of DVC.
+
+## 10. Contraction expansion & negation attachment
+
+**Context.**  Contractions broke into junk tokens and negated praise was lost.
+
+**Decision.** In `features/build_features.py` (added 2026-08-09): Normalize apostrophes, expand contractions, and attach negators to following sentiment words.
+
+**Rationale.** Stdlib‑only, preserves negated sentiment as explicit features.
+
+**Alternatives.** Scope tagging or bigram reliance — heavier and less reliable.
+
+## 11. De-duplicate before cleaning
+
+**Context.** Identical reviews bias classes and waste cleaning work.
+
+**Decision.** Drop duplicates on `[full_review, Reviewer_Score]` immediately
+after `combine_reviews()` — i.e. **before** cleaning/tokenization — and
+`reset_index(drop=True)`.
+
+**Rationale.** Saves regex passes, prevents leakage, keeps distinct scores.
+
+**Alternatives.** De-duplicating on `clean_review` after cleaning — collapses
+slightly more rows (two raw variants can clean to the same string) but costs a
+full cleaning pass over the duplicates; not worth it.
+
+## 12. Cleaning defects detected in code
+
+**Context.** Manual samples spotted issues but missed frequency/regressions.
+
+**Decision.** `validation/diagnose_cleaning.py` (added 2026-08-09) Added to scan interim CSV for defects and report counts/examples.
+
+**Rationale.** The checks are the executable record of *why* each fix exists, so
+a regression shows up as a count instead of being noticed by chance; running
+them against pre-fix data reproduces the original evidence. Keeping them out of
+the DAG means a heuristic (the `NEGATION_SKIP_WORDS` list, the stem list) can
+never break a build — `validate_data.py` remains the only hard gate. Writing it
+found a defect the samples had missed: 48 reviews that are only placeholder text
+and clean down to an empty document, now dropped in `build_features()`.
+
+**Alternatives.** Folding the checks into `validate_data.py` — rejected: these
+are tunable text heuristics, and a hard failure on them would block work for a
+handful of odd reviews. Unit tests over fixed strings — useful but they only
+cover cases already imagined; scanning the real corpus is what surfaces new ones
+(the two are complementary).

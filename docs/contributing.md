@@ -46,13 +46,25 @@ Match the existing code when adding new work:
 
 ### Change labeling / cleaning / vectorizer config
 1. Make the change in the relevant module.
-2. Bump the artifact version suffix (`_v1` → `_v2`), keeping the vectorizer paired
-   with the split it was fit on.
-3. `dvc repro`, then commit the lock + pointer files. See [Versioning](versioning.md).
+2. Bump the artifact version suffix (`_v1` → `_v2`) if the schema, the labeling
+   scheme, or the vectorizer config changed, keeping the vectorizer paired with
+   the split it was fit on. A cleaning-only change keeps the suffix.
+3. Add a row to the [version history](versioning.md#version-history) table
+   describing the change and its impact on downstream artifacts.
+4. `dvc repro` (this re-fits the vectorizer — required whenever the cleaning
+   changes the vocabulary), then commit the lock + pointer files.
+   See [Versioning](versioning.md).
+5. For a cleaning change, run `python -m validation.diagnose_cleaning` on the
+   rebuilt interim CSV — it reports the known cleaning defects (negators merged
+   with function words, contractions split into `<stem> t`, stray apostrophes,
+   empty documents, surviving duplicates) with counts and examples. Every check
+   should print `[OK]`; a `[ISSUE]` line names the fix it expects.
 
 ## Before you commit
 
 - [ ] `dvc repro` (or at least `python -m validation.validate_data`) passes green.
+- [ ] If you touched cleaning: `python -m validation.diagnose_cleaning` reports
+      `[OK]` for every check.
 - [ ] Commit `dvc.lock` and any `*.dvc` pointer files **with** the code change.
 - [ ] Do **not** commit files under `data/`, `feature_store/*.db`, or
       `model_store/*` — these are DVC-tracked and git-ignored.

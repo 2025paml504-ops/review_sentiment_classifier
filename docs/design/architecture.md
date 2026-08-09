@@ -14,8 +14,8 @@ rebuildable module wired together by a DVC DAG.
 | Component        | Responsibility                                                        |
 |------------------|-----------------------------------------------------------------------|
 | **Data layers**  | `data/raw` (immutable source) → `data/interim` (cleaned/labeled) → `data/processed` (model-ready splits) |
-| **`features/`**  | `build_features.py` (ingest → clean/tokenize → label) and `vectorize.py` (split + TF-IDF) |
-| **`validation/`**| `validate_data.py` gate, driven by the `feature_column.json` schema contract |
+| **`features/`**  | `build_features.py` (ingest → dedupe/drop empty → clean/tokenize, incl. contraction expansion + negation attachment → label) and `vectorize.py` (split + TF-IDF) |
+| **`validation/`**| `validate_data.py` gate, driven by the `feature_column.json` schema contract; `diagnose_cleaning.py` — off-DAG report on known cleaning defects |
 | **`feature_store/`** | `feature_store.py` — persists features to SQLite (`feature_store.db`, table `hotel_review_features`) |
 | **`model_store/`**   | Persisted model artifacts (`tfidf_vectorizer_v1.pkl`)             |
 | **`training/`**  | Reserved — model trainer, consumes `build_tfidf_features()`            |

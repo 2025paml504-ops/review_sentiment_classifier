@@ -56,3 +56,14 @@ vocabulary/IDF.
 The current **v1 contract** is: Scheme A sentiment thresholds
 (`NEGATIVE < 6`, `6 ≤ NEUTRAL < 8`, `POSITIVE ≥ 8` on `Reviewer_Score`) and the
 column schema in `validation/feature_column.json`.
+
+## Version history
+
+| Version | Date | Change | Impact |
+|---------|------|--------|--------|
+| **v1** | 2026-08-07 | Initial contract: lowercase → strip `no positive` / `no negative` placeholders → drop non-letters → collapse whitespace → whitespace tokenization; Scheme A sentiment thresholds; TF-IDF (`max_features=20000`, `ngram_range=(1,2)`, `min_df=5`, `sublinear_tf=True`) fit on the train split only. | Baseline. |
+| **v1.1** | 2026-08-09 | `features/build_features.py` cleaning overhaul: curly apostrophes (`U+2019`) normalized to ASCII; **contraction expansion** (`don't` → `do not`, the stray/missing-apostrophe repairs `don ' t` / `don t`, plus a generic `n't` / bare-`nt` catch-all); **negation attachment** (`not good` → `not_good`, negators `not, no, never, cannot, nor`) with `NEGATION_SKIP_WORDS` so `no one` / `not the` stay split; **de-duplication moved earlier** (on `full_review` + `Reviewer_Score`, before cleaning, with index reset) and rows with an empty `full_review` **or** empty `clean_review` dropped. Adds the diagnostic `validation/diagnose_cleaning.py`, which surfaced the placeholder-only reviews. | 504,731 rows. `clean_review` / `tokens` change for every review containing a contraction or a negator, so the TF-IDF vocabulary changes too. Sentiment thresholds and the column schema are **unchanged**. |
+
+v1.1 keeps the `_v1` filename label (schema and labels unchanged), but you
+must re-run `dvc repro` so the vectorizer is re-fit — an older
+`tfidf_vectorizer_v1.pkl` is **not** compatible with the newer text.

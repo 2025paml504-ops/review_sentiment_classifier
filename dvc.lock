@@ -9,61 +9,61 @@ stages:
       size: 238154765
     - path: features/build_features.py
       hash: md5
-      md5: bfed8a717fa81c550698e83bf2b4aaca
-      size: 3820
+      md5: 05936dec5de103ab9f4d489039b26494
+      size: 8990
     outs:
     - path: data/interim/features_clean.csv
       hash: md5
-      md5: 964cb2e85e136cc7550b48fc46c919f7
-      size: 481455046
+      md5: fb5cd9c60de2e4dacbd04ac5a70c7079
+      size: 479056405
   validate:
     cmd: python -m validation.validate_data
     deps:
     - path: data/interim/features_clean.csv
       hash: md5
-      md5: 964cb2e85e136cc7550b48fc46c919f7
-      size: 481455046
+      md5: fb5cd9c60de2e4dacbd04ac5a70c7079
+      size: 479056405
     - path: validation/feature_column.json
       hash: md5
-      md5: 13437a1491a3869ae922df8309b34263
-      size: 333
+      md5: f7ce50cf469f35f2948005a01ee985bc
+      size: 346
     - path: validation/validate_data.py
       hash: md5
-      md5: 25fc67f94f3627def5fbfacff23df472
-      size: 5279
+      md5: 2eb424e9a0e090fe56b633bcf7034ea5
+      size: 5427
   feature_store:
     cmd: python -m feature_store.feature_store
     deps:
     - path: data/interim/features_clean.csv
       hash: md5
-      md5: 964cb2e85e136cc7550b48fc46c919f7
-      size: 481455046
+      md5: fb5cd9c60de2e4dacbd04ac5a70c7079
+      size: 479056405
     - path: feature_store/feature_store.py
       hash: md5
-      md5: 226c58242ae1e9758482208171f3b209
-      size: 1518
+      md5: 973cdd224963a2d7be765e2616cd3f92
+      size: 1562
     outs:
     - path: feature_store/feature_store.db
       hash: md5
-      md5: 0b14d210a8035d8ec44067dca629de69
-      size: 541659136
+      md5: 051acf5ab88f1120aaf31acfc5a439b8
+      size: 538988544
   vectorize:
     cmd: python -m features.vectorize
     deps:
     - path: feature_store/feature_store.db
       hash: md5
-      md5: 0b14d210a8035d8ec44067dca629de69
-      size: 541659136
+      md5: 051acf5ab88f1120aaf31acfc5a439b8
+      size: 538988544
     - path: features/vectorize.py
       hash: md5
-      md5: 83aafe3631855ec5284d68029b2d60ad
-      size: 2391
+      md5: c75c36eb571944df3a11b1253110d538
+      size: 2463
     outs:
     - path: data/processed/train_v1.csv
       hash: md5
-      md5: 5c8bc87f7e2ed72731b005ae2aa76eb8
-      size: 79117068
+      md5: 6bfbd7b121f1f2450b4b2bfbf43fae30
+      size: 79351229
     - path: model_store/tfidf_vectorizer_v1.pkl
       hash: md5
-      md5: d53380ab0fa764b9fe19f48af4283820
-      size: 787484
+      md5: 56296d77b5b2ef6ac20f1207b4fdc888
+      size: 789597
