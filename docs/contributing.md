@@ -7,9 +7,14 @@
 - **Python 3.14** + `venv`
 - **git**
 - **DVC** (installed via `requirements.txt`)
+- **MLflow** (installed via `requirements.txt`) — not optional, every training stage imports it.
 
-All dependencies are open source: `pandas`, `SQLAlchemy` (SQLite), `scikit-learn`,
-and `dvc`.
+All dependencies are open source and declared in `requirements.txt`: `pandas`,
+`numpy`, `SQLAlchemy` (SQLite), `scikit-learn`, `joblib`, `dvc`, `mlflow`,
+plus `kaggle` (optional download helper), and `torch`/`transformers`/
+`datasets`/`accelerate`/`sentencepiece`/`tiktoken` for the transformer
+fine-tune and the recurrent stage (which shares `torch`) — all imported
+lazily, so the rest of the pipeline runs without them.
 
 ```bash
 python3 -m venv .venv
@@ -29,6 +34,9 @@ Match the existing code when adding new work:
 - **Stages are rebuildable**: they read from a `data/` layer (or the feature
   store) and write to the next. `feature_store` and `vectorize` auto-regenerate
   the interim data if it's missing.
+- **Every training run is tracked**: wrap the fit in
+  `training.tracking.start_run(...)` and log parameters, metrics and artifacts
+  through the yielded handle.
 
 ## Common tasks
 
@@ -55,17 +63,33 @@ Match the existing code when adding new work:
    changes the vocabulary), then commit the lock + pointer files.
    See [Versioning](versioning.md).
 5. For a cleaning change, run `python -m validation.diagnose_cleaning` on the
-   rebuilt interim CSV — it reports the known cleaning defects (negators merged
-   with function words, contractions split into `<stem> t`, stray apostrophes,
-   empty documents, surviving duplicates) with counts and examples. Every check
-   should print `[OK]`; a `[ISSUE]` line names the fix it expects.
+   rebuilt interim CSV — it reports the known cleaning defects with counts and
+   examples. Every check should print `[OK]`; a `[ISSUE]` line names the fix
+   it expects.
+
+### Add a model or change hyperparameters
+1. Add the estimator to `MODELS` in `training/train_linear.py`, edit
+   `training/train_rnn.py`, or edit `training/train_transformer.py`.
+2. Log the change: hyperparameters into `params`, new scores into `metrics`,
+   new files through `run.log_artifact(...)`. Anything not logged is
+   invisible in the comparison.
+3. Only the default model writes the DVC-tracked `training/metrics_logreg.json`; a
+   comparison run writes `training/metrics_<model>.json`.
+4. Run the trainer, then compare against previous runs in
+   `mlflow ui --backend-store-uri sqlite:///mlflow.db` on macro-F1 before
+   promoting anything to the default.
+5. A new model **family** needs its own module, its own DVC stage, and its
+   own `training/metrics_<family>.json` metric (`cache: false`).
 
 ## Before you commit
 
 - [ ] `dvc repro` (or at least `python -m validation.validate_data`) passes green.
 - [ ] If you touched cleaning: `python -m validation.diagnose_cleaning` reports
       `[OK]` for every check.
+- [ ] If you touched training: the run shows up in `mlflow ui` with its
+      parameters, metrics and artifacts.
 - [ ] Commit `dvc.lock` and any `*.dvc` pointer files **with** the code change.
-- [ ] Do **not** commit files under `data/`, `feature_store/*.db`, or
-      `model_store/*` — these are DVC-tracked and git-ignored.
+- [ ] Do **not** commit files under `data/`, `feature_store/*.db`,
+      `model_store/*`, `mlflow.db` or `mlartifacts/` — these are DVC-tracked
+      or regenerable, and git-ignored.
 - [ ] `dvc push` if you have access to a shared remote.

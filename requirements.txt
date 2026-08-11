@@ -1,4 +1,29 @@
+# Core pipeline (build_features -> validate -> feature_store -> vectorize ->
+# train -> train_transformer)
 pandas
+numpy
 SQLAlchemy
 scikit-learn
+joblib
 dvc
+# Experiment tracking (training/tracking.py): required by both training stages.
+mlflow
+
+# Optional: Kaggle download helper (data_ingestion/), imported lazily.
+kaggle
+
+# Transformer fine-tune (training/train_transformer.py). These are heavy
+# (torch alone is ~2 GB) and are imported lazily, so the rest of the pipeline
+# runs without them. For a CUDA build of torch, follow
+# https://pytorch.org/get-started/locally/ instead of the default CPU wheel.
+torch
+transformers
+datasets
+accelerate
+sentencepiece
+tiktoken
+
+# Recurrent baseline (training/train_rnn.py) reuses `torch` above - no extra
+# dependency. It is deliberately *not* Keras: TensorFlow publishes no wheels
+# for the Python 3.14 this project runs on. Added 10 Aug - Ankita.
+

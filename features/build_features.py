@@ -24,10 +24,31 @@ NEGATORS = {"not", "no", "never", "cannot", "nor"}
 # Added on 9 Aug - Ankita: Function words that carry no sentiment. Merging a
 # negator with one of these (not_the, no_one) only produces low-value tokens
 # that dilute the 20k TF-IDF budget, so the negator is left standing alone.
+# NEGATION_SKIP_WORDS = {
+#     "the", "a", "an", "be", "to", "of", "i", "it", "we", "they", "he", "she",
+#     "and", "or", "but", "that", "this", "is", "are", "was", "were", "in",
+#     "on", "at", "for", "as", "one", "any", "there", "my", "our", "you",
+# }
+# Added 11 Aug - Ankita: "the", "a", "an" and "that" moved out to
+# NEGATION_SKIP_THROUGH below - those should be skipped *past* to reach the
+# real target, not treated as a hard stop, or "not the best" leaves "best"
+# completely unmarked (confirmed on 6.9% of rows). "one" and the rest stay
+# here as a hard stop - "no one" is a fixed phrase, not a negator + filler.
 NEGATION_SKIP_WORDS = {
-    "the", "a", "an", "be", "to", "of", "i", "it", "we", "they", "he", "she",
-    "and", "or", "but", "that", "this", "is", "are", "was", "were", "in",
+    "be", "to", "of", "i", "it", "we", "they", "he", "she",
+    "and", "or", "but", "this", "is", "are", "was", "were", "in",
     "on", "at", "for", "as", "one", "any", "there", "my", "our", "you",
+}
+
+# Added 11 Aug - Ankita: determiners/demonstratives/intensifiers that sit
+# between a negator and its real target rather than being the target
+# themselves or blocking the merge. Distinct from NEGATION_SKIP_WORDS above:
+# "no one" must stay split (a fixed phrase, "one" is a hard stop), but
+# "not the best" / "not very good" / "not that great" should skip past the
+# filler to reach "best"/"good"/"great" - confirmed missing on 6.9% of rows.
+NEGATION_SKIP_THROUGH = {
+    "the", "a", "an", "that", "very", "really", "so", "too", "quite",
+    "pretty", "extremely",
 }
 
 # Added on 9 Aug - Ankita: Contractions dictionary
@@ -84,6 +105,17 @@ def _expand_nt(match: re.Match) -> str:
     return f"{text[:-2]} not"
 
 # Sentiment label thresholds on Reviewer_Score (Scheme A): NEG < 6, 6 <= NEU < 8, POS >= 8.
+# Produced a 10.3 / 24.9 / 64.8 split; picked by hand to be "the least imbalanced
+# observed", not from an external convention.
+# NPS-style thresholds tried 10-11 Aug - Ankita (Promoter 9-10 / Passive 7-8 /
+# Detractor 0-6): raised macro-F1 and NEGATIVE/NEUTRAL detection on every one
+# of the four models (e.g. logreg macro-F1 0.618 -> 0.647), but *lowered* raw
+# accuracy on all of them (e.g. LinearSVC 71.8% -> 65.1%) because the old
+# scheme's 65%-POSITIVE imbalance is exactly what inflates accuracy without
+# reflecting real quality. Reverted 11 Aug - Ankita: accuracy is the number
+# that needs to read higher here, so back to Scheme A.
+# SENTIMENT_NEUTRAL_FLOOR = 7.0
+# SENTIMENT_POSITIVE_FLOOR = 9.0
 SENTIMENT_NEUTRAL_FLOOR = 6.0
 SENTIMENT_POSITIVE_FLOOR = 8.0
 SENTIMENT_LABELS = ["NEGATIVE", "NEUTRAL", "POSITIVE"]
@@ -115,30 +147,83 @@ def drop_columns(df: pd.DataFrame, columns=COLUMNS_TO_DROP) -> pd.DataFrame:
 def combine_reviews(df: pd.DataFrame) -> pd.DataFrame:
     """Add a `full_review` column: positive and negative review text combined."""
     df = df.copy()
-    df["full_review"] = (
-        df["Positive_Review"].fillna("") + " " + df["Negative_Review"].fillna("")
-    ).str.strip()
+    # positive = df["Positive_Review"].fillna("")
+    # negative = df["Negative_Review"].fillna("")
+    # df["full_review"] = (positive + " " + negative).str.strip()
+    #
+    # Bug found 11 Aug - Ankita: full_review was only ever meant to feed
+    # clean_text() (which strips "No Positive"/"No Negative" internally), so
+    # nothing stripped the placeholder from full_review itself. Once a
+    # consumer reads full_review directly (the transformer, for raw-text
+    # input), it sees the literal placeholder as real text - confirmed on 31%
+    # of rows (156,389 / 504,731). Stripped here at the field level (only when
+    # a field IS the bare placeholder) instead: more precise than the
+    # substring match in clean_text()'s _PLACEHOLDER_RE, which can also catch
+    # the phrase inside genuine text (a rare false positive, ~0.07% of rows).
+    positive = df["Positive_Review"].fillna("")
+    negative = df["Negative_Review"].fillna("")
+    positive = positive.where(positive.str.strip().str.lower() != "no positive", "")
+    negative = negative.where(negative.str.strip().str.lower() != "no negative", "")
+    df["full_review"] = (positive + " " + negative).str.strip()
     return df
 
 # Added on 9 Aug - Ankita: Negation handler
+# def handle_negations(tokens: list[str]) -> list[str]:
+#     """Attach negators to the following word (e.g., 'not good' -> 'not_good')."""
+#     result = []
+#     skip = False
+#     for i, token in enumerate(tokens):
+#         if skip:
+#             skip = False
+#             continue
+#         if (
+#             token in NEGATORS
+#             and i + 1 < len(tokens)
+#             and tokens[i + 1] not in NEGATION_SKIP_WORDS
+#         ):
+#             result.append(f"{token}_{tokens[i+1]}")
+#             skip = True
+#         else:
+#             result.append(token)
+#     return result
+#
+# Bug found 11 Aug - Ankita: the version above only ever looked one token
+# ahead, and gave up entirely (leaving the negator standing alone) when that
+# token was a function word - so "not the best" / "not that great" / "not a
+# good experience" left "best"/"great"/"good" completely unmarked, a raw
+# positive token in the bag of words. Confirmed on 6.9% of rows
+# (34,610 / 504,731). Fixed below: skip past up to MAX_NEGATION_SKIP
+# determiners/intensifiers to reach the real sentiment target.
+MAX_NEGATION_SKIP = 3  # Added by Ankita 11 Aug
+
+
 def handle_negations(tokens: list[str]) -> list[str]:
-    """Attach negators to the following word (e.g., 'not good' -> 'not_good')."""
+    """Attach negators to the next content word (e.g. 'not good' -> 'not_good',
+    'not the best' -> 'not_best'), skipping past up to MAX_NEGATION_SKIP
+    determiners/intensifiers (NEGATION_SKIP_THROUGH) to reach it. A negator
+    immediately followed by a NEGATION_SKIP_WORDS hard-stop (e.g. 'one' in
+    'no one') is left standing alone instead - that's a fixed phrase, not a
+    negator plus skippable filler."""
     result = []
-    skip = False
+    skip_to = -1
     for i, token in enumerate(tokens):
-        if skip:
-            skip = False
+        if i <= skip_to:
             continue
-        # Added on 9 Aug - Ankita: skip merging with function words
-        if (
-            token in NEGATORS
-            and i + 1 < len(tokens)
-            and tokens[i + 1] not in NEGATION_SKIP_WORDS
-        ):
-            result.append(f"{token}_{tokens[i+1]}")
-            skip = True
-        else:
-            result.append(token)
+        if token in NEGATORS and i + 1 < len(tokens) and tokens[i + 1] not in NEGATION_SKIP_WORDS:
+            j = i + 1
+            skipped = 0
+            while (
+                j < len(tokens)
+                and tokens[j] in NEGATION_SKIP_THROUGH
+                and skipped < MAX_NEGATION_SKIP
+            ):
+                j += 1
+                skipped += 1
+            if j < len(tokens) and tokens[j] not in NEGATION_SKIP_WORDS and tokens[j] not in NEGATORS:
+                result.append(f"{token}_{tokens[j]}")
+                skip_to = j
+                continue
+        result.append(token)
     return result
 
 def clean_text(text: str) -> str:

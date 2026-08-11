@@ -1,4 +1,2 @@
 [core]
     remote = localremote
-['remote "localremote"']
-    url = /Users/sonalgupta/dvc-remotes/review_sentiment_classifier

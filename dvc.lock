@@ -40,8 +40,8 @@ stages:
       size: 479056405
     - path: feature_store/feature_store.py
       hash: md5
-      md5: 973cdd224963a2d7be765e2616cd3f92
-      size: 1562
+      md5: 51a8cd95aeab0f9df5550fe6a653c5cc
+      size: 3621
     outs:
     - path: feature_store/feature_store.db
       hash: md5
@@ -56,14 +56,138 @@ stages:
       size: 538988544
     - path: features/vectorize.py
       hash: md5
-      md5: c75c36eb571944df3a11b1253110d538
-      size: 2463
+      md5: e845ac9a7610d1728f93b41dff9015d0
+      size: 2845
     outs:
+    - path: data/processed/test_v1.csv
+      hash: md5
+      md5: a90368f4774dc590bcb0afa6a1b6eb63
+      size: 19835862
     - path: data/processed/train_v1.csv
       hash: md5
       md5: 6bfbd7b121f1f2450b4b2bfbf43fae30
       size: 79351229
     - path: model_store/tfidf_vectorizer_v1.pkl
       hash: md5
-      md5: 56296d77b5b2ef6ac20f1207b4fdc888
+      md5: 6f4f2b9423f31711f01039d9874dea25
       size: 789597
+  train:
+    cmd: python -m training.train_model
+    deps:
+    - path: data/processed/test_v1.csv
+      hash: md5
+      md5: a90368f4774dc590bcb0afa6a1b6eb63
+      size: 19835862
+    - path: data/processed/train_v1.csv
+      hash: md5
+      md5: 6bfbd7b121f1f2450b4b2bfbf43fae30
+      size: 79351229
+    - path: feature_store/feature_store.py
+      hash: md5
+      md5: 51a8cd95aeab0f9df5550fe6a653c5cc
+      size: 3621
+    - path: model_store/tfidf_vectorizer_v1.pkl
+      hash: md5
+      md5: 6f4f2b9423f31711f01039d9874dea25
+      size: 789597
+    - path: training/tracking.py
+      hash: md5
+      md5: 3a96a8f491d31052c422e9e9fe71433d
+      size: 9908
+    - path: training/train_model.py
+      hash: md5
+      md5: a91b9ede139e8639318e5633e9a9a205
+      size: 6682
+    - path: validation/feature_column.json
+      hash: md5
+      md5: f7ce50cf469f35f2948005a01ee985bc
+      size: 346
+    outs:
+    - path: model_store/logreg_v1.pkl
+      hash: md5
+      md5: d0618e9d8868527576ed5bbb1d8cecec
+      size: 481055
+    - path: training/metrics.json
+      hash: md5
+      md5: ccc86f3ba81ea3dc311ce96ba798f31b
+      size: 1127
+  train_linear_svc:
+    cmd: python -m training.train_model --model linear_svc
+    deps:
+    - path: data/processed/test_v1.csv
+      hash: md5
+      md5: a90368f4774dc590bcb0afa6a1b6eb63
+      size: 19835862
+    - path: data/processed/train_v1.csv
+      hash: md5
+      md5: 6bfbd7b121f1f2450b4b2bfbf43fae30
+      size: 79351229
+    - path: feature_store/feature_store.py
+      hash: md5
+      md5: 51a8cd95aeab0f9df5550fe6a653c5cc
+      size: 3621
+    - path: model_store/tfidf_vectorizer_v1.pkl
+      hash: md5
+      md5: 6f4f2b9423f31711f01039d9874dea25
+      size: 789597
+    - path: training/tracking.py
+      hash: md5
+      md5: 3a96a8f491d31052c422e9e9fe71433d
+      size: 9908
+    - path: training/train_model.py
+      hash: md5
+      md5: a91b9ede139e8639318e5633e9a9a205
+      size: 6682
+    - path: validation/feature_column.json
+      hash: md5
+      md5: f7ce50cf469f35f2948005a01ee985bc
+      size: 346
+    outs:
+    - path: model_store/linear_svc_v1.pkl
+      hash: md5
+      md5: afaa3670196bfca0952862fe9335ab27
+      size: 480923
+    - path: training/metrics_linear_svc.json
+      hash: md5
+      md5: 15c0b796a6394c6368e84c086c85c0d2
+      size: 1046
+  train_rnn:
+    cmd: python -m training.train_rnn
+    deps:
+    - path: data/processed/test_v1.csv
+      hash: md5
+      md5: a90368f4774dc590bcb0afa6a1b6eb63
+      size: 19835862
+    - path: data/processed/train_v1.csv
+      hash: md5
+      md5: 6bfbd7b121f1f2450b4b2bfbf43fae30
+      size: 79351229
+    - path: feature_store/feature_store.py
+      hash: md5
+      md5: 51a8cd95aeab0f9df5550fe6a653c5cc
+      size: 3621
+    - path: training/tracking.py
+      hash: md5
+      md5: 3a96a8f491d31052c422e9e9fe71433d
+      size: 9908
+    - path: training/train_rnn.py
+      hash: md5
+      md5: af3286104df8dbcd15a96ef8e5122765
+      size: 17055
+    - path: validation/feature_column.json
+      hash: md5
+      md5: f7ce50cf469f35f2948005a01ee985bc
+      size: 346
+    outs:
+    - path: model_store/rnn_lstm_v1.pt
+      hash: md5
+      md5: 582673a97fa387c80d28f3df04cfa1da
+      size: 10774405
+    - path: model_store/rnn_lstm_v1_vocab.json
+      hash: md5
+      md5: c60d6a52c52a1d673e69ca73e68d65e2
+      size: 357163
+    - path: training/metrics_rnn_lstm.json
+      hash: md5
+      md5: 077d14c3088a6ad3542d3f8c4980c1fe
+      size: 1128

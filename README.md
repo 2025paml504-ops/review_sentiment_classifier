@@ -6,7 +6,8 @@ automatically classify incoming hotel-review text by sentiment into three
 classes: **NEGATIVE**, **NEUTRAL**, and **POSITIVE**.
 
 Built on an all-open-source stack: `pandas`, `SQLAlchemy` (SQLite),
-`scikit-learn`, and `DVC` for data/artifact versioning.
+`scikit-learn`, `DVC` for data/artifact versioning, `MLflow` for experiment
+tracking, and `PyTorch`/`transformers` for the recurrent and transformer models.
 
 ## Quick start
 
@@ -20,7 +21,9 @@ python3 -m venv .venv
 ```
 
 `dvc repro` runs the pipeline stages in dependency order and skips anything
-already up-to-date.
+already up-to-date. The pipeline now also trains four models; the last stage
+(`train_transformer`) is the heaviest (~1 hour) — run `dvc repro train`
+instead to stop at the fast linear baseline.
 
 ## Repository layout
 
@@ -28,25 +31,28 @@ already up-to-date.
 |------------------|------------------------------------------------------------------|
 | `data/raw/`      | Immutable source data (`Hotel_Reviews.csv`)                      |
 | `data/interim/`  | Cleaned/labeled, rebuildable intermediate (`features_clean.csv`) |
-| `data/processed/`| Model-ready splits (`train_v1.csv`)                              |
+| `data/processed/`| Model-ready splits (`train_v1.csv`, `test_v1.csv`)               |
 | `features/`      | Feature engineering (`build_features.py`, `vectorize.py`)        |
 | `validation/`    | Data-quality checks + JSON schema contract                       |
 | `feature_store/` | SQLite feature store (`feature_store.db`)                        |
-| `model_store/`   | Persisted model artifacts (`tfidf_vectorizer_v1.pkl`)            |
-| `training/`      | Reserved for the model trainer (consumes the TF-IDF features)    |
+| `model_store/`   | Persisted model artifacts, one set per trained model              |
+| `training/`      | Four trainers, MLflow tracking (`tracking.py`), leaderboard (`compare_runs.py`) |
+| `mlflow.db`, `mlartifacts/` | Local MLflow tracking store (git-ignored, regenerable)  |
 | `serving/`, `ui/`| Reserved for serving and UI                                      |
 
 ## Documentation
 
 - **[Dataset](docs/dataset.md)** — source (Kaggle 515K) and the raw/interim/processed data layers.
 - **[Pipeline](docs/pipeline.md)** — the DVC DAG, each stage in detail, and the schema contract.
-- **[Versioning](docs/versioning.md)** — how DVC versions data/artifacts, the remote, and cutting a new version.
+- **[Versioning](docs/versioning.md)** — how DVC versions data/artifacts, experiment tracking, and cutting a new version.
 - **[Contributing](docs/contributing.md)** — prerequisites, code conventions, common-task recipes, and the pre-commit checklist.
 - **[Design](docs/design/README.md)** — architecture guide and the decision-making guide (why cleaning, sentiment thresholds, TF-IDF, SQLite, DVC, …).
 
 ## Status / roadmap
 
-The data → features → feature store → TF-IDF pipeline is complete. `training/`,
-`serving/`, and `ui/` are reserved for the next tasks (model training, API
-serving, and UI).
-
+The data → features → feature store → TF-IDF → training pipeline covers four
+models — `logreg` (default), `linear_svc`, a recurrent net (`rnn_lstm`), and a
+BERT-mini fine-tune — trained on the same splits and compared on macro-F1.
+Every run is tracked in MLflow, so results are comparable and reproducible.
+See [Decisions §13–20](docs/design/decisions.md) for what was built, tried,
+and (where it didn't help) reverted. `serving/` and `ui/` remain reserved.

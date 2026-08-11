@@ -1,14 +1,15 @@
 # Data & artifact versioning (DVC)
 
-[← Back to README](../README.md) · Related: [Dataset](dataset.md) · [Pipeline](pipeline.md)
+[← Back to README](../README.md) · Related: [Dataset](dataset.md) · [Pipeline](versioning.md)
 
 Data and model artifacts are versioned with **[DVC](https://dvc.org)**, which
 works alongside git: git tracks small text pointers (`dvc.yaml`, `dvc.lock`,
 `*.dvc`, `.dvcignore`) while the large files (~1.3 GB) live in DVC's cache/remote
 and never enter git history. The whole pipeline is defined as a DVC DAG in
-`dvc.yaml` (`build_features → validate → feature_store → vectorize`), so
-`dvc.lock` records the exact content hash of every artifact — pinning a
-reproducible dataset version to each git commit.
+`dvc.yaml` (`build_features → validate → feature_store → vectorize →
+{train, train_linear_svc, train_rnn, train_transformer}`), so `dvc.lock`
+records the exact content hash of every artifact — pinning a reproducible
+dataset and model version to each git commit.
 
 ## Everyday workflow
 
@@ -28,30 +29,28 @@ Change code/config, run `dvc repro`, then
 
 ## Remote
 
-A default **local** remote named `localremote` is configured in `.dvc/config`:
-
-```
-/Users/sonalgupta/dvc-remotes/review_sentiment_classifier
-```
-
-`dvc push` copies cached artifacts there; `dvc pull` restores them. This path is
-**machine-local** — on another machine either re-point it:
+The default remote is named `localremote`. Only the **name** is git-tracked
+(`.dvc/config`); the **URL is per-machine** and lives in the git-ignored
+`.dvc/config.local`, set once per checkout:
 
 ```bash
-dvc remote modify localremote url <your-path-or-url>
+dvc remote modify --local localremote url <your-path-or-url>
 ```
 
-or swap in a cloud remote (S3/GCS/Azure/SSH) with the same command — the rest of
-the workflow is unchanged.
+`dvc push` copies cached artifacts there; `dvc pull` restores them. Swap in a
+cloud remote (S3/GCS/Azure/SSH) the same way — the rest of the workflow is
+unchanged.
 
 ## Naming convention
 
-The `_v1` suffix (`train_v1.csv`, `tfidf_vectorizer_v1.pkl`) is a human-readable
-label that coexists with DVC's content hashes. Bump to `_v2` when the
-cleaning/tokenization logic, the sentiment labeling thresholds, or the vectorizer
-configuration change. A fitted vectorizer must always be versioned **alongside
-the exact split it was fit on** so training and serving use the same
-vocabulary/IDF.
+The `_v1` suffix (`train_v1.csv`, `tfidf_vectorizer_v1.pkl`, `logreg_v1.pkl`,
+`linear_svc_v1.pkl`, `rnn_lstm_v1.pt`, `bert_mini_v1/`, …) is a human-readable
+label that coexists with DVC's content hashes — one artifact set per trained
+model, all versioned against the same data contract. Bump to `_v2` when the
+cleaning/tokenization logic, the sentiment labeling thresholds, or the
+vectorizer configuration change. A fitted vectorizer must always be versioned
+**alongside the exact split it was fit on**, and a trained model is only
+valid with the vectorizer it was trained against.
 
 The current **v1 contract** is: Scheme A sentiment thresholds
 (`NEGATIVE < 6`, `6 ≤ NEUTRAL < 8`, `POSITIVE ≥ 8` on `Reviewer_Score`) and the
@@ -59,11 +58,18 @@ column schema in `validation/feature_column.json`.
 
 ## Version history
 
-| Version | Date | Change | Impact |
-|---------|------|--------|--------|
-| **v1** | 2026-08-07 | Initial contract: lowercase → strip `no positive` / `no negative` placeholders → drop non-letters → collapse whitespace → whitespace tokenization; Scheme A sentiment thresholds; TF-IDF (`max_features=20000`, `ngram_range=(1,2)`, `min_df=5`, `sublinear_tf=True`) fit on the train split only. | Baseline. |
-| **v1.1** | 2026-08-09 | `features/build_features.py` cleaning overhaul: curly apostrophes (`U+2019`) normalized to ASCII; **contraction expansion** (`don't` → `do not`, the stray/missing-apostrophe repairs `don ' t` / `don t`, plus a generic `n't` / bare-`nt` catch-all); **negation attachment** (`not good` → `not_good`, negators `not, no, never, cannot, nor`) with `NEGATION_SKIP_WORDS` so `no one` / `not the` stay split; **de-duplication moved earlier** (on `full_review` + `Reviewer_Score`, before cleaning, with index reset) and rows with an empty `full_review` **or** empty `clean_review` dropped. Adds the diagnostic `validation/diagnose_cleaning.py`, which surfaced the placeholder-only reviews. | 504,731 rows. `clean_review` / `tokens` change for every review containing a contraction or a negator, so the TF-IDF vocabulary changes too. Sentiment thresholds and the column schema are **unchanged**. |
+| Version | Change | Impact |
+|---|---|---|
+| **v1** | Original `main`: cleaning → Scheme A thresholds → TF-IDF fit on train only. | Baseline. |
+| **1.1** | Cleaning overhaul: contraction expansion, negation attachment (`not good` → `not_good`), earlier de-duplication, and the `diagnose_cleaning` diagnostic. | 504,731 rows. Thresholds/schema unchanged. |
+| **1.2** | Four training stages + MLflow experiment tracking added. A negation-scope bug (6.9% of rows) and a placeholder leak into `full_review` (31% of rows) were found and fixed. Several tuning experiments were tried and measured, then rolled back when they didn't help — see [Decisions](design/decisions.md) for what was tried and why. | New model artifacts per stage; 503,446 rows after the dedup fix; data contract unchanged. |
 
-v1.1 keeps the `_v1` filename label (schema and labels unchanged), but you
-must re-run `dvc repro` so the vectorizer is re-fit — an older
-`tfidf_vectorizer_v1.pkl` is **not** compatible with the newer text.
+## Experiment tracking
+
+Every training run also logs to **MLflow** (`training/tracking.py`): params,
+metrics, tags, and artifacts including `dvc.lock` as the dataset reference —
+stored in `mlflow.db` / `mlartifacts/` (git-ignored, regenerable). To
+reproduce a run: read its `git_commit` tag, check it out, `dvc checkout`, and
+re-run with the logged parameters. Compare runs with `mlflow ui
+--backend-store-uri sqlite:///mlflow.db` or `python -m training.compare_runs`.
+See [Decisions §16](design/decisions.md).
