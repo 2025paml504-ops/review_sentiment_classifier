@@ -28,6 +28,10 @@ Design:
   label distribution of `feature_store.db`, which is far too large to attach)
   and the **feature schema** `validation/feature_column.json`, so a run answers
   "which code, which data, which columns?" on its own.
+* **Environment, not just requirements.txt.** `requirements.txt` names packages
+  with no version pins, so it alone can't answer "which library versions
+  trained this?" a month later. Each run also logs `pip freeze` output
+  (`environment/pip_freeze.txt`), added by Ankita 11-Aug.
 
 Usage:
 
@@ -41,6 +45,7 @@ import contextlib
 import logging
 import os
 import subprocess
+import sys
 from pathlib import Path
 
 import mlflow
@@ -188,6 +193,11 @@ class Run:
         """Attach an in-memory dict as a JSON artifact (e.g. the confusion matrix)."""
         mlflow.log_dict(payload, filename)
 
+    # Added by Ankita 11-Aug
+    def log_text(self, text: str, filename: str) -> None:
+        """Attach an in-memory string as a text artifact (e.g. pip freeze output)."""
+        mlflow.log_text(text, filename)
+
     def log_sklearn_model(self, model, artifact_path: str = "model") -> None:
         """Log a fitted estimator in MLflow's own (loadable) model format."""
         # `artifact_path` was renamed to `name` in mlflow 3; support both so the
@@ -218,6 +228,24 @@ def log_feature_inputs(run: "Run") -> None:
     run.log_artifact(FEATURE_SCHEMA, "schema")
 
 
+# Added by Ankita 11-Aug: requirements.txt names packages but pins no versions,
+# so two runs months apart could train under different library versions with
+# nothing in the record to tell them apart. pip freeze closes that gap per run.
+def log_environment(run: "Run") -> None:
+    """Snapshot exact installed package versions as a per-run text artifact."""
+    try:
+        out = subprocess.run(
+            [sys.executable, "-m", "pip", "freeze"],
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+    except (OSError, subprocess.CalledProcessError) as exc:
+        logger.warning("Could not capture pip freeze: %s", exc)
+        return
+    run.log_text(out.stdout, "environment/pip_freeze.txt")
+
+
 @contextlib.contextmanager
 def start_run(run_name: str, params: dict | None = None, tags: dict | None = None):
     """Open a tracked run in the project experiment and yield its `Run` handle.
@@ -242,5 +270,6 @@ def start_run(run_name: str, params: dict | None = None, tags: dict | None = Non
         # dataset reference that makes the run reproducible.
         run.log_artifact(DVC_LOCK, "dataset")
         log_feature_inputs(run)
+        log_environment(run)
         logger.info("MLflow run %s (experiment %s)", run.run_id, EXPERIMENT_NAME)
         yield run
