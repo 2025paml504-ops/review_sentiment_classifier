@@ -14,14 +14,22 @@ runs (`--limit`) are excluded by default -- they are not scored versions.
     python -m training.compare_runs --all            # include smoke runs
     python -m training.compare_runs --sort accuracy
     python -m training.compare_runs --json           # machine-readable
+    python -m training.compare_runs --md             # also write docs/leaderboard.md
 """
 
 import argparse
 import json
+from datetime import datetime, timezone
+from pathlib import Path
 
 import mlflow
 
 from training import tracking
+
+# Added by Ankita 11-Aug: mlflow.db/mlartifacts are git-ignored (per-machine
+# tracking store), so scores never reach GitHub on their own. --md renders this
+# same leaderboard as a committable markdown table.
+DEFAULT_MD_PATH = "docs/leaderboard.md"
 
 # The columns that make two runs comparable at a glance. Metric names are shared
 # by both trainers on purpose (see training/train_transformer.py).
@@ -97,11 +105,67 @@ def format_table(rows: list[dict]) -> str:
     return "\n".join(lines)
 
 
+# Added by Ankita 11-Aug: markdown twin of format_table(), for the --md flag.
+def format_markdown(rows: list[dict]) -> str:
+    """Render the leaderboard as a GitHub-flavored markdown table."""
+    columns = [
+        ("run_name", "Run"),
+        ("model_name", "Model"),
+        ("macro_f1", "macro-F1"),
+        ("accuracy", "Accuracy"),
+        ("roc_auc_macro", "ROC-AUC (macro)"),
+        ("git_commit", "Commit"),
+    ]
+    header = "| " + " | ".join(label for _, label in columns) + " |"
+    sep = "|" + "|".join("---" for _ in columns) + "|"
+    lines = [header, sep]
+    for row in rows:
+        cells = []
+        for name, _ in columns:
+            value = row.get(name)
+            if value is None:
+                text = "-"
+            elif isinstance(value, float):
+                text = f"{value:.4f}"
+            elif name == "git_commit":
+                text = str(value)[:8]
+            else:
+                text = str(value)
+            cells.append(text)
+        lines.append("| " + " | ".join(cells) + " |")
+    return "\n".join(lines)
+
+
+# Added by Ankita 11-Aug: writes the leaderboard to disk so it survives even
+# though mlflow.db itself is git-ignored.
+def write_markdown(rows: list[dict], path: str, sort_by: str) -> None:
+    generated = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+    content = (
+        "# Model leaderboard\n\n"
+        f"Generated {generated} by `python -m training.compare_runs --md`, "
+        f"ranked by `{sort_by}`. Source: MLflow (`mlflow.db`, local/git-ignored) "
+        "-- re-run after training to refresh.\n\n"
+        f"{format_markdown(rows)}\n"
+    )
+    out = Path(path)
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_text(content, encoding="utf-8")
+    print(f"wrote {out}")
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--all", action="store_true", help="include smoke (--limit) runs")
     parser.add_argument("--sort", default="macro_f1", help="metric to rank by")
     parser.add_argument("--json", action="store_true", help="print raw rows as JSON")
+    parser.add_argument(
+        "--md",
+        nargs="?",
+        const=DEFAULT_MD_PATH,
+        default=None,
+        metavar="PATH",
+        help=f"also write the leaderboard as markdown (default: {DEFAULT_MD_PATH})",
+    )
     args = parser.parse_args()
 
     rows = fetch_runs(include_smoke=args.all, sort_by=args.sort)
@@ -117,6 +181,9 @@ def main() -> None:
     else:
         print(f"Experiment: {tracking.EXPERIMENT_NAME}  ({len(rows)} runs, ranked by {args.sort})")
         print(format_table(rows))
+
+    if args.md:
+        write_markdown(rows, args.md, args.sort)
 
 
 if __name__ == "__main__":
