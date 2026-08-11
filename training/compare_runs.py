@@ -105,6 +105,20 @@ def format_table(rows: list[dict]) -> str:
     return "\n".join(lines)
 
 
+# Added by Ankita 11-Aug: the committed leaderboard should read as "where do we
+# stand today", not a full run history -- keep one row per model, its most
+# recent run, so re-running a model doesn't pile up duplicate rows over time.
+def latest_per_model(rows: list[dict]) -> list[dict]:
+    """Keep only the most recent run for each distinct model_name."""
+    best: dict[str, dict] = {}
+    for row in rows:
+        key = row.get("model_name") or row.get("run_name")
+        current = best.get(key)
+        if current is None or (row.get("started") or "") > (current.get("started") or ""):
+            best[key] = row
+    return list(best.values())
+
+
 # Added by Ankita 11-Aug: markdown twin of format_table(), for the --md flag.
 def format_markdown(rows: list[dict]) -> str:
     """Render the leaderboard as a GitHub-flavored markdown table."""
@@ -136,16 +150,58 @@ def format_markdown(rows: list[dict]) -> str:
     return "\n".join(lines)
 
 
+# Added by Ankita 11-Aug: one label:value block per model -- run id, accuracy,
+# ROC-AUC, macro-F1 -- the compact "where do we stand" view, as opposed to
+# format_table()'s full multi-column run history.
+def format_checklist(rows: list[dict]) -> str:
+    """Render one label:value block per row: run id, accuracy, ROC-AUC, macro-F1."""
+
+    def fmt(row: dict, name: str) -> str:
+        value = row.get(name)
+        return f"{value:.4f}" if isinstance(value, float) else "-"
+
+    blocks = []
+    for row in rows:
+        blocks.append(
+            f"Run ID   : {row.get('run_id') or '-'}\n"
+            f"Model    : {row.get('model_name') or '-'}\n"
+            f"Accuracy : {fmt(row, 'accuracy')}\n"
+            f"ROC-AUC  : {fmt(row, 'roc_auc_macro')}\n"
+            f"F1       : {fmt(row, 'macro_f1')}"
+        )
+    return "\n\n".join(blocks)
+
+
+# Added by Ankita 11-Aug: an interrupted run (killed before evaluate() logs
+# anything) has no score at all -- drop it, one row per model (latest run),
+# ranked by sort_by. Shared by the terminal --md view and the written file so
+# both show exactly the same set.
+def build_leaderboard(rows: list[dict], sort_by: str) -> list[dict]:
+    scored = [row for row in rows if row.get(sort_by) is not None]
+    latest = latest_per_model(scored)
+    latest.sort(key=lambda row: row[sort_by], reverse=True)
+    return latest
+
+
 # Added by Ankita 11-Aug: writes the leaderboard to disk so it survives even
 # though mlflow.db itself is git-ignored.
 def write_markdown(rows: list[dict], path: str, sort_by: str) -> None:
+    latest = build_leaderboard(rows, sort_by)
     generated = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+    best_line = ""
+    if latest:
+        best = latest[0]
+        best_line = (
+            f"\n**Best model: `{best['model_name']}`** "
+            f"(`{sort_by}` = {best[sort_by]:.4f}).\n"
+        )
     content = (
         "# Model leaderboard\n\n"
         f"Generated {generated} by `python -m training.compare_runs --md`, "
-        f"ranked by `{sort_by}`. Source: MLflow (`mlflow.db`, local/git-ignored) "
-        "-- re-run after training to refresh.\n\n"
-        f"{format_markdown(rows)}\n"
+        f"ranked by `{sort_by}`, one row per model (its latest completed run). "
+        "Source: MLflow (`mlflow.db`, local/git-ignored) -- re-run after training "
+        f"to refresh.\n{best_line}\n"
+        f"```\n{format_checklist(latest)}\n```\n"
     )
     out = Path(path)
     out.parent.mkdir(parents=True, exist_ok=True)
@@ -178,6 +234,12 @@ def main() -> None:
 
     if args.json:
         print(json.dumps(rows, indent=2, default=str))
+    elif args.md:
+        # Added by Ankita 11-Aug: mirror what gets written to the .md file --
+        # one checkmark block per model's latest completed run.
+        leaderboard = build_leaderboard(rows, args.sort)
+        print(f"Experiment: {tracking.EXPERIMENT_NAME}  (best per model, ranked by {args.sort})")
+        print(format_checklist(leaderboard))
     else:
         print(f"Experiment: {tracking.EXPERIMENT_NAME}  ({len(rows)} runs, ranked by {args.sort})")
         print(format_table(rows))
