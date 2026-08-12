@@ -99,29 +99,27 @@ only: it writes nothing and always exits 0, so run it after any cleaning change.
 
 ## Experiment tracking
 
-Every training run also logs to **MLflow** (`training/tracking.py`):
-`start_run(...)` auto-attaches the git commit/dirty state, a feature-store
-snapshot, `dvc.lock`, and a `pip freeze` snapshot before the trainer logs its
-own params/metrics — stored in `mlflow.db` / `mlruns/` (git-ignored,
-regenerable). Model versioning is three layers: `dvc.lock` pins each model's
-exact hash per commit, the `_v1` filename gets overwritten every retrain, and
-MLflow keeps an immutable per-run copy for `logreg`/`linear_svc` only — the
-RNN and transformer have no such copy, so `dvc.lock` is their only way back to
-an old version. Compare runs with `mlflow ui --backend-store-uri
-sqlite:///mlflow.db` or `python -m training.compare_runs` (`--md` writes
-[`docs/model_leaderboard.md`](model_leaderboard.md), ranked by each model's
-best run, not latest). See [Decisions §16](design/decisions.md).
+Every training run also logs to **MLflow** (`training/tracking.py`). Before
+training starts, it automatically records which code version, which data, and
+which library versions were used; the trainer then logs its own settings and
+scores. Everything is stored locally in `mlflow.db` / `mlruns/` (not
+committed to git). Each model is also versioned two ways: DVC tracks the exact
+file `dvc repro` produced, and MLflow additionally keeps a permanent, separate
+copy for `logreg`/`linear_svc` only, so an old version of those two is never
+lost even after retraining. Compare all runs with
+`python -m training.compare_runs` (`--md` writes
+[`docs/model_leaderboard.md`](model_leaderboard.md)). Details:
+[Decisions §16](design/decisions.md).
 
 ## Reproducibility
 
-Same inputs and same code give the same outputs here: `RANDOM_STATE = 42`
-(`features/vectorize.py`) is threaded through the split, every sklearn
-estimator, `torch.manual_seed` plus the RNN's `DataLoader` generator, and
-HuggingFace's `set_seed()` / `Trainer(seed=...)` — verified directly, since
-re-running the RNN reproduces identical loss values at a given epoch.
-`feature_store.snapshot()` fingerprints the data (sha256, row count, label
-distribution) so "which data" is a hash, not a mutable path, and every
-hyperparameter is logged per run, not just the saved model. The one real gap:
-`requirements.txt` pins no versions, so a fresh install can silently diverge —
-the `pip freeze` snapshot above reveals that drift after the fact, it does not
-prevent it. See [Decisions §21](design/decisions.md).
+Running the same code on the same data should always give the same result.
+Three things make that true: every random step in training starts from a
+fixed point (`RANDOM_STATE = 42`), so results don't vary by chance; the exact
+data used is fingerprinted and logged with every run, not just referred to by
+a file name that could change later; and every setting used to train a model
+is logged, not just the final model file. The one known gap: exact library
+versions aren't locked in `requirements.txt`, so results could shift if
+installed fresh months later — a snapshot of the installed versions is logged
+per run so that drift is at least visible after the fact, even though it
+isn't prevented. Details: [Decisions §21](design/decisions.md).
