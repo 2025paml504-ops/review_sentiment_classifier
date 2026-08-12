@@ -323,26 +323,6 @@ than each trainer means a new trainer cannot forget it.
 run; the hash is the useful part. Per-class ROC-AUC — noisy on the 10%
 NEGATIVE class, already covered by per-class recall.
 
-## 19. Three training stages, and artifacts named after what they are (v1.2)
-
-**Context.** Auditing the run history found two problems: `linear_svc` had no
-DVC stage (only a manual `--model` flag), so it never appeared via `dvc
-repro`; the transformer's artifact was still named `distilbert_v1` though the
-stage actually fine-tunes BERT-mini. The DVC remote URL was also a
-machine-local path committed to shared config.
-
-**Decision.** Added a `train_linear_svc` stage to `dvc.yaml`. Renamed the
-transformer artifacts `distilbert_v1` → `bert_mini_v1`. Moved the remote URL
-out of the git-tracked `.dvc/config` into the git-ignored `.dvc/config.local`.
-
-**Rationale.** A comparison that can silently lose a model is not a comparison
-— a declared stage always shows up in `dvc dag`; a manual flag is easy to
-forget. A wrong artifact name is worse than none. A machine-local path in
-shared config breaks every other clone.
-
-**Alternatives.** A `foreach` stage over model names — obscures which metric
-file belongs to which model.
-
 ## 20. A recurrent baseline as its own stage and its own module (v1.2)
 
 **Context.** The comparison had two poles — bag-of-ngrams linear models (§13)
