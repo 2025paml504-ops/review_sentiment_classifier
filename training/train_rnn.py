@@ -1,4 +1,4 @@
-"""Recurrent (RNN / LSTM / BiLSTM) sentiment classifier (added 10 Aug - Ankita).
+"""Recurrent (RNN / LSTM / BiLSTM) sentiment classifier (v1.2).
 
     The third model family, next to the TF-IDF linear baseline
     (`training/train_linear.py`) and the transformer fine-tune
@@ -64,7 +64,7 @@ MAX_LENGTH = 200
 EMBEDDING_DIM = 128
 RECURRENT_UNITS = 128
 DROPOUT = 0.2
-# 4 epochs tried 10 Aug - Ankita: val loss kept dropping (0.689 -> 0.687) but
+# 4 epochs tried (v1.2): val loss kept dropping (0.689 -> 0.687) but
 # macro-F1 fell 0.6436 -> 0.6393 - epoch 4 overfits the metric that matters,
 # even though raw loss looked fine. Reverted to 3.
 EPOCHS = 3
@@ -196,7 +196,7 @@ def class_weights(y_train: np.ndarray) -> dict[int, float]:
     return {int(label): float(weight) for label, weight in zip(present, weights)}
 
 
-# Added by Ankita 10 Aug: confidence_threshold param, mirroring train_linear.py's
+# Added (v1.2): confidence_threshold param, mirroring train_linear.py's
 # evaluate() - same abstention idea (defer instead of forcing a guess), reusing
 # the softmax probabilities already computed for ROC-AUC, no extra cost.
 def full_metrics(y_true, y_pred, probabilities=None, confidence_threshold: float | None = None) -> dict:
@@ -230,7 +230,7 @@ def full_metrics(y_true, y_pred, probabilities=None, confidence_threshold: float
             except ValueError as exc:
                 logger.warning("ROC-AUC (%s) not computable: %s", average, exc)
 
-        # Added by Ankita 10 Aug
+        # Added (v1.2)
         if confidence_threshold is not None:
             confidence = probabilities.max(axis=1)
             thresholded_pred = probabilities.argmax(axis=1)
@@ -281,7 +281,7 @@ def run_params(arch: str, epochs: int, batch_size: int, learning_rate: float,
         "limit": limit if limit is not None else "none",
         "train_csv": TRAIN_CSV.name,
         "test_csv": TEST_CSV.name,
-        # Added by Ankita 10 Aug
+        # Added (v1.2)
         "confidence_threshold": confidence_threshold if confidence_threshold is not None else "none",
     }
 
@@ -308,7 +308,7 @@ def train(
     batch_size: int = BATCH_SIZE,
     learning_rate: float = LEARNING_RATE,
     limit: int | None = None,
-    confidence_threshold: float | None = None,  # Added by Ankita 10 Aug
+    confidence_threshold: float | None = None,  # Added (v1.2)
 ) -> dict:
     import torch
     from torch import nn
@@ -433,7 +433,7 @@ if __name__ == "__main__":
     parser.add_argument("--batch-size", type=int, default=BATCH_SIZE)
     parser.add_argument("--learning-rate", type=float, default=LEARNING_RATE)
     parser.add_argument("--limit", type=int, default=None, help="only read the first N rows")
-    # Added by Ankita 10 Aug: same opt-in abstention as train_linear.py
+    # Added (v1.2): same opt-in abstention as train_linear.py
     parser.add_argument(
         "--confidence-threshold", type=float, default=None,
         help="abstain below this confidence; logs coverage and accuracy_at_threshold",

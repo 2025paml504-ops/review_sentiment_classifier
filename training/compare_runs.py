@@ -1,4 +1,4 @@
-"""Side-by-side comparison of the tracked runs (added 10 Aug - Ankita).
+"""Side-by-side comparison of the tracked runs (v1.2).
 
 The MLflow UI does this interactively
 (`mlflow ui --backend-store-uri sqlite:///mlflow.db`), but a leaderboard is worth
@@ -14,7 +14,7 @@ runs (`--limit`) are excluded by default -- they are not scored versions.
     python -m training.compare_runs --all            # include smoke runs
     python -m training.compare_runs --sort accuracy
     python -m training.compare_runs --json           # machine-readable
-    python -m training.compare_runs --md             # also write docs/leaderboard.md
+    python -m training.compare_runs --md             # also write docs/model_leaderboard.md
 """
 
 import argparse
@@ -26,10 +26,10 @@ import mlflow
 
 from training import tracking
 
-# Added by Ankita 11-Aug: mlflow.db/mlartifacts are git-ignored (per-machine
+# Added (v1.2): mlflow.db/mlruns are git-ignored (per-machine
 # tracking store), so scores never reach GitHub on their own. --md renders this
 # same leaderboard as a committable markdown table.
-DEFAULT_MD_PATH = "docs/leaderboard.md"
+DEFAULT_MD_PATH = "docs/model_leaderboard.md"
 
 # The columns that make two runs comparable at a glance. Metric names are shared
 # by both trainers on purpose (see training/train_transformer.py).
@@ -105,21 +105,25 @@ def format_table(rows: list[dict]) -> str:
     return "\n".join(lines)
 
 
-# Added by Ankita 11-Aug: the committed leaderboard should read as "where do we
-# stand today", not a full run history -- keep one row per model, its most
-# recent run, so re-running a model doesn't pile up duplicate rows over time.
-def latest_per_model(rows: list[dict]) -> list[dict]:
-    """Keep only the most recent run for each distinct model_name."""
+# Added (v1.3), changed from latest-per-model to best-per-model: a
+# "latest run" can be a rejected tuning experiment (e.g. an epoch count that
+# overfit and was never made the default), which would then show up as this
+# model's leaderboard entry even though it isn't what the committed code
+# produces. Best score per model avoids that -- see Decisions for the caveat
+# this doesn't handle (a lucky non-default-flag run can still outscore the
+# default one and would still win here).
+def best_per_model(rows: list[dict], sort_by: str) -> list[dict]:
+    """Keep only the highest-sort_by run for each distinct model_name."""
     best: dict[str, dict] = {}
     for row in rows:
         key = row.get("model_name") or row.get("run_name")
         current = best.get(key)
-        if current is None or (row.get("started") or "") > (current.get("started") or ""):
+        if current is None or row[sort_by] > current[sort_by]:
             best[key] = row
     return list(best.values())
 
 
-# Added by Ankita 11-Aug: markdown twin of format_table(), for the --md flag.
+# Added (v1.2): markdown twin of format_table(), for the --md flag.
 def format_markdown(rows: list[dict]) -> str:
     """Render the leaderboard as a GitHub-flavored markdown table."""
     columns = [
@@ -150,11 +154,11 @@ def format_markdown(rows: list[dict]) -> str:
     return "\n".join(lines)
 
 
-# Added by Ankita 11-Aug: one label:value block per model -- run id, accuracy,
-# ROC-AUC, macro-F1 -- the compact "where do we stand" view, as opposed to
-# format_table()'s full multi-column run history.
+# Added (v1.2, timestamp added v1.3): one label:value block per model -- run
+# id, when it ran, accuracy, ROC-AUC, macro-F1 -- the compact "where do we
+# stand" view, as opposed to format_table()'s full multi-column run history.
 def format_checklist(rows: list[dict]) -> str:
-    """Render one label:value block per row: run id, accuracy, ROC-AUC, macro-F1."""
+    """Render one label:value block per row: run id, start time, accuracy, ROC-AUC, macro-F1."""
 
     def fmt(row: dict, name: str) -> str:
         value = row.get(name)
@@ -162,8 +166,10 @@ def format_checklist(rows: list[dict]) -> str:
 
     blocks = []
     for row in rows:
+        started = (row.get("started") or "-")[:16]  # "YYYY-MM-DD HH:MM", drop seconds/tz
         blocks.append(
             f"Run ID   : {row.get('run_id') or '-'}\n"
+            f"Started  : {started}\n"
             f"Model    : {row.get('model_name') or '-'}\n"
             f"Accuracy : {fmt(row, 'accuracy')}\n"
             f"ROC-AUC  : {fmt(row, 'roc_auc_macro')}\n"
@@ -172,25 +178,41 @@ def format_checklist(rows: list[dict]) -> str:
     return "\n\n".join(blocks)
 
 
-# Added by Ankita 11-Aug: an interrupted run (killed before evaluate() logs
-# anything) has no score at all -- drop it, one row per model (latest run),
+# Added (v1.3): a run from before a data regen can still have a higher
+# macro-F1 than anything today's pipeline reproduces -- misleading, not
+# "best". Restrict to runs trained on the CURRENT feature store when any
+# exist, so a stale run never wins just because the data changed under it.
+def _current_feature_store_hash() -> str | None:
+    from feature_store import feature_store
+
+    snapshot = feature_store.snapshot()
+    return snapshot["sha256"][:12] if snapshot else None
+
+
+# Added (v1.2): an interrupted run (killed before evaluate() logs
+# anything) has no score at all -- drop it, one row per model (its best run),
 # ranked by sort_by. Shared by the terminal --md view and the written file so
 # both show exactly the same set.
 def build_leaderboard(rows: list[dict], sort_by: str) -> list[dict]:
     scored = [row for row in rows if row.get(sort_by) is not None]
-    latest = latest_per_model(scored)
-    latest.sort(key=lambda row: row[sort_by], reverse=True)
-    return latest
+    current_hash = _current_feature_store_hash()
+    if current_hash:
+        current_only = [row for row in scored if row.get("feature_store_sha256") == current_hash]
+        if current_only:
+            scored = current_only
+    best = best_per_model(scored, sort_by)
+    best.sort(key=lambda row: row[sort_by], reverse=True)
+    return best
 
 
-# Added by Ankita 11-Aug: writes the leaderboard to disk so it survives even
+# Added (v1.2): writes the leaderboard to disk so it survives even
 # though mlflow.db itself is git-ignored.
 def write_markdown(rows: list[dict], path: str, sort_by: str) -> None:
-    latest = build_leaderboard(rows, sort_by)
+    leaderboard = build_leaderboard(rows, sort_by)
     generated = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
     best_line = ""
-    if latest:
-        best = latest[0]
+    if leaderboard:
+        best = leaderboard[0]
         best_line = (
             f"\n**Best model: `{best['model_name']}`** "
             f"(`{sort_by}` = {best[sort_by]:.4f}).\n"
@@ -198,10 +220,10 @@ def write_markdown(rows: list[dict], path: str, sort_by: str) -> None:
     content = (
         "# Model leaderboard\n\n"
         f"Generated {generated} by `python -m training.compare_runs --md`, "
-        f"ranked by `{sort_by}`, one row per model (its latest completed run). "
+        f"ranked by `{sort_by}`, one row per model (its best completed run). "
         "Source: MLflow (`mlflow.db`, local/git-ignored) -- re-run after training "
         f"to refresh.\n{best_line}\n"
-        f"```\n{format_checklist(latest)}\n```\n"
+        f"```\n{format_checklist(leaderboard)}\n```\n"
     )
     out = Path(path)
     out.parent.mkdir(parents=True, exist_ok=True)
@@ -214,6 +236,11 @@ def main() -> None:
     parser.add_argument("--all", action="store_true", help="include smoke (--limit) runs")
     parser.add_argument("--sort", default="macro_f1", help="metric to rank by")
     parser.add_argument("--json", action="store_true", help="print raw rows as JSON")
+    parser.add_argument(
+        "--full",
+        action="store_true",
+        help="print every run (not just each model's best) in the label:value format, console only",
+    )
     parser.add_argument(
         "--md",
         nargs="?",
@@ -235,11 +262,18 @@ def main() -> None:
     if args.json:
         print(json.dumps(rows, indent=2, default=str))
     elif args.md:
-        # Added by Ankita 11-Aug: mirror what gets written to the .md file --
-        # one checkmark block per model's latest completed run.
+        # Added (v1.2): mirror what gets written to the .md file --
+        # one checkmark block per model's best completed run.
         leaderboard = build_leaderboard(rows, args.sort)
         print(f"Experiment: {tracking.EXPERIMENT_NAME}  (best per model, ranked by {args.sort})")
         print(format_checklist(leaderboard))
+    elif args.full:
+        # Added (v1.3): every run, not deduped to one-per-model, in the same
+        # readable Run ID / Started / scores format as --md -- for "show me
+        # everything, in the console, not just the leaderboard".
+        ordered = sorted(rows, key=lambda row: row.get(args.sort) if row.get(args.sort) is not None else -1, reverse=True)
+        print(f"Experiment: {tracking.EXPERIMENT_NAME}  ({len(ordered)} runs, ranked by {args.sort})")
+        print(format_checklist(ordered))
     else:
         print(f"Experiment: {tracking.EXPERIMENT_NAME}  ({len(rows)} runs, ranked by {args.sort})")
         print(format_table(rows))

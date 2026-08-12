@@ -18,10 +18,10 @@ _PLACEHOLDER_RE = re.compile(r"no positive|no negative")
 _NON_LETTER_RE = re.compile(r"[^a-z\s]")
 _WHITESPACE_RE = re.compile(r"\s+")
 
-# Added on 9 Aug - Ankita: Expanded negator set
+# Added (v1.1): Expanded negator set
 NEGATORS = {"not", "no", "never", "cannot", "nor"}
 
-# Added on 9 Aug - Ankita: Function words that carry no sentiment. Merging a
+# Added (v1.1): Function words that carry no sentiment. Merging a
 # negator with one of these (not_the, no_one) only produces low-value tokens
 # that dilute the 20k TF-IDF budget, so the negator is left standing alone.
 # NEGATION_SKIP_WORDS = {
@@ -29,7 +29,7 @@ NEGATORS = {"not", "no", "never", "cannot", "nor"}
 #     "and", "or", "but", "that", "this", "is", "are", "was", "were", "in",
 #     "on", "at", "for", "as", "one", "any", "there", "my", "our", "you",
 # }
-# Added 11 Aug - Ankita: "the", "a", "an" and "that" moved out to
+# Added (v1.2): "the", "a", "an" and "that" moved out to
 # NEGATION_SKIP_THROUGH below - those should be skipped *past* to reach the
 # real target, not treated as a hard stop, or "not the best" leaves "best"
 # completely unmarked (confirmed on 6.9% of rows). "one" and the rest stay
@@ -40,7 +40,7 @@ NEGATION_SKIP_WORDS = {
     "on", "at", "for", "as", "one", "any", "there", "my", "our", "you",
 }
 
-# Added 11 Aug - Ankita: determiners/demonstratives/intensifiers that sit
+# Added (v1.2): determiners/demonstratives/intensifiers that sit
 # between a negator and its real target rather than being the target
 # themselves or blocking the merge. Distinct from NEGATION_SKIP_WORDS above:
 # "no one" must stay split (a fixed phrase, "one" is a hard stop), but
@@ -51,7 +51,7 @@ NEGATION_SKIP_THROUGH = {
     "pretty", "extremely",
 }
 
-# Added on 9 Aug - Ankita: Contractions dictionary
+# Added (v1.1): Contractions dictionary
 CONTRACTIONS = {
     "don't": "do not", "i'm": "i am", "can't": "cannot", "won't": "will not",
     "it's": "it is", "you're": "you are", "they're": "they are",
@@ -63,25 +63,25 @@ CONTRACTIONS = {
     "needn't": "need not"
 }
 
-# Added on 9 Aug - Ankita: Single compiled alternation (word-bounded) instead of
+# Added (v1.1): Single compiled alternation (word-bounded) instead of
 # one str.replace pass per entry; longest keys first so no key masks a longer one.
 _CONTRACTIONS_RE = re.compile(
     r"\b(" + "|".join(re.escape(c) for c in sorted(CONTRACTIONS, key=len, reverse=True)) + r")\b"
 )
-# Added on 9 Aug - Ankita: Curly apostrophe (U+2019) normalized to ASCII apostrophe.
+# Added (v1.1): Curly apostrophe (U+2019) normalized to ASCII apostrophe.
 _CURLY_APOSTROPHE = "\u2019"
-# Added on 9 Aug - Ankita: Some reviews spell contractions with spaces around the
+# Added (v1.1): Some reviews spell contractions with spaces around the
 # apostrophe ("don ' t"), which escaped _CONTRACTIONS_RE and shattered into
 # "don" + "t". Collapse the spacing before contraction expansion runs.
 _SPACED_APOSTROPHE_RE = re.compile(r"\s*'\s*")
-# Added on 9 Aug - Ankita: Catch-all for the long tail. The apostrophe form is
+# Added (v1.1): Catch-all for the long tail. The apostrophe form is
 # generic; bare forms are listed explicitly so real words (went, want) are safe.
 _NT_RE = re.compile(
     r"n't\b|\b(?:do|does|did|is|are|was|were|has|have|had|could|should|would|must|ai|ca|wo)nt\b"
 )
 
 
-# Added on 9 Aug - Ankita: Repair for reviews where the apostrophe is missing
+# Added (v1.1): Repair for reviews where the apostrophe is missing
 # entirely ("if you don t mind"), which the contraction pass cannot see. Stems
 # are listed explicitly so ordinary "<word> t" sequences stay untouched.
 _SPLIT_NT_STEMS = {
@@ -107,12 +107,12 @@ def _expand_nt(match: re.Match) -> str:
 # Sentiment label thresholds on Reviewer_Score (Scheme A): NEG < 6, 6 <= NEU < 8, POS >= 8.
 # Produced a 10.3 / 24.9 / 64.8 split; picked by hand to be "the least imbalanced
 # observed", not from an external convention.
-# NPS-style thresholds tried 10-11 Aug - Ankita (Promoter 9-10 / Passive 7-8 /
+# NPS-style thresholds tried (v1.2) (Promoter 9-10 / Passive 7-8 /
 # Detractor 0-6): raised macro-F1 and NEGATIVE/NEUTRAL detection on every one
 # of the four models (e.g. logreg macro-F1 0.618 -> 0.647), but *lowered* raw
 # accuracy on all of them (e.g. LinearSVC 71.8% -> 65.1%) because the old
 # scheme's 65%-POSITIVE imbalance is exactly what inflates accuracy without
-# reflecting real quality. Reverted 11 Aug - Ankita: accuracy is the number
+# reflecting real quality. Reverted (v1.2): accuracy is the number
 # that needs to read higher here, so back to Scheme A.
 # SENTIMENT_NEUTRAL_FLOOR = 7.0
 # SENTIMENT_POSITIVE_FLOOR = 9.0
@@ -151,7 +151,7 @@ def combine_reviews(df: pd.DataFrame) -> pd.DataFrame:
     # negative = df["Negative_Review"].fillna("")
     # df["full_review"] = (positive + " " + negative).str.strip()
     #
-    # Bug found 11 Aug - Ankita: full_review was only ever meant to feed
+    # Bug found (v1.2): full_review was only ever meant to feed
     # clean_text() (which strips "No Positive"/"No Negative" internally), so
     # nothing stripped the placeholder from full_review itself. Once a
     # consumer reads full_review directly (the transformer, for raw-text
@@ -167,7 +167,7 @@ def combine_reviews(df: pd.DataFrame) -> pd.DataFrame:
     df["full_review"] = (positive + " " + negative).str.strip()
     return df
 
-# Added on 9 Aug - Ankita: Negation handler
+# Added (v1.1): Negation handler
 # def handle_negations(tokens: list[str]) -> list[str]:
 #     """Attach negators to the following word (e.g., 'not good' -> 'not_good')."""
 #     result = []
@@ -187,14 +187,14 @@ def combine_reviews(df: pd.DataFrame) -> pd.DataFrame:
 #             result.append(token)
 #     return result
 #
-# Bug found 11 Aug - Ankita: the version above only ever looked one token
+# Bug found (v1.2): the version above only ever looked one token
 # ahead, and gave up entirely (leaving the negator standing alone) when that
 # token was a function word - so "not the best" / "not that great" / "not a
 # good experience" left "best"/"great"/"good" completely unmarked, a raw
 # positive token in the bag of words. Confirmed on 6.9% of rows
 # (34,610 / 504,731). Fixed below: skip past up to MAX_NEGATION_SKIP
 # determiners/intensifiers to reach the real sentiment target.
-MAX_NEGATION_SKIP = 3  # Added by Ankita 11 Aug
+MAX_NEGATION_SKIP = 3  # Added (v1.2)
 
 
 def handle_negations(tokens: list[str]) -> list[str]:
@@ -230,19 +230,19 @@ def clean_text(text: str) -> str:
     """Expand contractions, lowercase, strip placeholder phrases, drop non-letters, collapse whitespace, and handle negations."""
     text = str(text).lower()
 
-    # Added on 9 Aug - Ankita: Normalize curly apostrophes, then expand contractions
+    # Added (v1.1): Normalize curly apostrophes, then expand contractions
     text = text.replace(_CURLY_APOSTROPHE, "'")
-    text = _SPACED_APOSTROPHE_RE.sub("'", text)  # Added on 9 Aug - Ankita
+    text = _SPACED_APOSTROPHE_RE.sub("'", text)  # Added (v1.1)
     text = _CONTRACTIONS_RE.sub(lambda m: CONTRACTIONS[m.group()], text)
     text = _NT_RE.sub(_expand_nt, text)
 
     text = _PLACEHOLDER_RE.sub(" ", text)
     text = _NON_LETTER_RE.sub(" ", text)
     text = _WHITESPACE_RE.sub(" ", text).strip()
-    text = _SPLIT_NT_RE.sub(_expand_split_nt, text)  # Added on 9 Aug - Ankita
+    text = _SPLIT_NT_RE.sub(_expand_split_nt, text)  # Added (v1.1)
 
     tokens = text.split()
-    tokens = handle_negations(tokens)  # Added on 9 Aug - Ankita
+    tokens = handle_negations(tokens)  # Added (v1.1)
 
     return " ".join(tokens)
 
@@ -273,13 +273,13 @@ def build_features(path=RAW_DATA_PATH) -> pd.DataFrame:
     df = load_raw_data(path)
     df = drop_columns(df)
     df = combine_reviews(df)
-    # Added on 9 Aug - Ankita: Deduplicate earlier for efficiency, reset index
+    # Added (v1.1): Deduplicate earlier for efficiency, reset index
     df = df.drop_duplicates(subset=["full_review", "Reviewer_Score"])
-    # Added on 9 Aug - Ankita: Drop reviews with no text at all; they would reach
+    # Added (v1.1): Drop reviews with no text at all; they would reach
     # the feature store and the TF-IDF split as empty documents.
     df = df[df["full_review"].str.strip().astype(bool)].reset_index(drop=True)
     df = clean_and_tokenize(df)
-    # Added on 9 Aug - Ankita: Some reviews are only placeholder phrases or
+    # Added (v1.1): Some reviews are only placeholder phrases or
     # non-letters, so they clean down to nothing (surfaced by
     # validation/diagnose_cleaning.py). Drop them too.
     df = df[df["clean_review"].str.strip().astype(bool)].reset_index(drop=True)

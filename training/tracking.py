@@ -1,4 +1,4 @@
-"""MLflow experiment tracking for the training stages (added 9 Aug - Ankita).
+"""MLflow experiment tracking for the training stages (v1.2).
 
 A saved `.pkl` records *what* the model is, never *how* it got there. This
 module adds the missing half: every training run logs its parameters, metrics,
@@ -31,7 +31,7 @@ Design:
 * **Environment, not just requirements.txt.** `requirements.txt` names packages
   with no version pins, so it alone can't answer "which library versions
   trained this?" a month later. Each run also logs `pip freeze` output
-  (`environment/pip_freeze.txt`), added by Ankita 11-Aug.
+  (`environment/pip_freeze.txt`), added (v1.2).
 
 Usage:
 
@@ -171,7 +171,7 @@ class Run:
         """Log every scalar in a (possibly nested) metrics dict."""
         mlflow.log_metrics(flatten_metrics(metrics))
 
-    # Added 10 Aug - Ankita: the recurrent trainer produces a value per epoch,
+    # Added (v1.2): the recurrent trainer produces a value per epoch,
     # not just a final one, and a learning curve is what tells an under-trained
     # net apart from a plateaued one.
     def log_metric_step(self, key: str, value: float, step: int) -> None:
@@ -193,7 +193,7 @@ class Run:
         """Attach an in-memory dict as a JSON artifact (e.g. the confusion matrix)."""
         mlflow.log_dict(payload, filename)
 
-    # Added by Ankita 11-Aug
+    # Added (v1.2)
     def log_text(self, text: str, filename: str) -> None:
         """Attach an in-memory string as a text artifact (e.g. pip freeze output)."""
         mlflow.log_text(text, filename)
@@ -228,7 +228,7 @@ def log_feature_inputs(run: "Run") -> None:
     run.log_artifact(FEATURE_SCHEMA, "schema")
 
 
-# Added by Ankita 11-Aug: requirements.txt names packages but pins no versions,
+# Added (v1.2): requirements.txt names packages but pins no versions,
 # so two runs months apart could train under different library versions with
 # nothing in the record to tell them apart. pip freeze closes that gap per run.
 def log_environment(run: "Run") -> None:

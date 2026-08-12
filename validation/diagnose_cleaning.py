@@ -1,4 +1,4 @@
-"""Diagnose text-cleaning issues in the interim features (added 9 Aug - Ankita).
+"""Diagnose text-cleaning issues in the interim features (v1.1).
 
 This is the *detection* side of the cleaning fixes recorded in
 [Decisions §10-11](../docs/design/decisions.md): each check below reproduces the

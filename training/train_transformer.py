@@ -1,6 +1,6 @@
 """Fine-tune a transformer classifier on the same splits as the linear baseline.
 
-    Written 10 Aug - Ankita. This is the heavier alternative deferred in
+    Written (v1.2). This is the heavier alternative deferred in
     [Decisions §4/§13](../docs/design/decisions.md): instead of TF-IDF + a linear
     model, a pretrained encoder (BERT-mini by default) is fine-tuned end-to-end on
     the review text.
@@ -74,7 +74,7 @@ BASE_MODEL = "google/bert_uncased_L-4_H-256_A-4"
 TOKENIZER_FALLBACK = "google-bert/bert-base-uncased"
 # decisions.md #15 documents "max_length=256, 2 epochs, lr 2e-5" as the
 # intended config, but that combination multiplies runtime past what's
-# workable here (11 Aug - Ankita) - kept at the faster values that already
+# workable here (v1.2) - kept at the faster values that already
 # produced a real, scored run; only the input text and the loss weighting
 # change today, not these three.
 MAX_LENGTH = 64
@@ -88,7 +88,7 @@ LABEL2ID = {label: i for i, label in enumerate(SENTIMENT_LABELS)}
 ID2LABEL = {i: label for label, i in LABEL2ID.items()}
 
 # TEXT_COLUMN = "full_review"
-# Raw text tested in isolation 11 Aug - Ankita against the clean_review
+# Raw text tested in isolation v1.2 against the clean_review
 # baseline (macro-F1 0.6461, accuracy 70.93%): full_review scored 0.6459 /
 # 70.67% - a wash, marginally lower on both. The theory (a transformer
 # pretrained on natural English shouldn't need stripped/underscore-glued
@@ -124,7 +124,7 @@ def softmax(logits: np.ndarray) -> np.ndarray:
     return exp / exp.sum(axis=-1, keepdims=True)
 
 
-# Added by Ankita 11 Aug: confidence_threshold param, matching train_linear.py's
+# Added (v1.2): confidence_threshold param, matching train_linear.py's
 # evaluate() and train_rnn.py's full_metrics() - same opt-in abstention,
 # reusing the softmax probabilities already computed for ROC-AUC.
 def full_metrics(y_true, y_pred, probabilities=None, confidence_threshold: float | None = None) -> dict:
@@ -162,7 +162,7 @@ def full_metrics(y_true, y_pred, probabilities=None, confidence_threshold: float
             except ValueError as exc:
                 logger.warning("ROC-AUC (%s) not computable: %s", average, exc)
 
-        # Added by Ankita 11 Aug
+        # Added (v1.2)
         if confidence_threshold is not None:
             confidence = probabilities.max(axis=1)
             thresholded_pred = probabilities.argmax(axis=1)
@@ -197,7 +197,7 @@ def run_params(
     batch_size: int,
     learning_rate: float,
     limit: int | None,
-    confidence_threshold: float | None = None,  # Added by Ankita 11 Aug
+    confidence_threshold: float | None = None,  # Added (v1.2)
 ) -> dict:
     """The knobs worth logging, named like the baseline's so the UI can align them."""
     return {
@@ -209,12 +209,12 @@ def run_params(
         "model.warmup_steps": WARMUP_STEPS,
         "model.max_length": MAX_LENGTH,
         # "model.class_weight": "none",
-        "model.class_weight": "balanced",  # Added by Ankita 11 Aug
+        "model.class_weight": "balanced",  # Added (v1.2)
         "random_state": RANDOM_STATE,
         "limit": limit if limit is not None else "none",
         "train_csv": TRAIN_CSV.name,
         "test_csv": TEST_CSV.name,
-        # Added by Ankita 11 Aug
+        # Added (v1.2)
         "confidence_threshold": confidence_threshold if confidence_threshold is not None else "none",
     }
 
@@ -242,7 +242,7 @@ def build_dataset(df: pd.DataFrame, tokenizer):
     return ds
 
 
-# Added by Ankita 11 Aug: built inside train(), not at module level - Trainer
+# Added (v1.2): built inside train(), not at module level - Trainer
 # is one of the lazily-imported transformers symbols (module docstring: the
 # heavy deps are imported inside the functions that need them so the rest of
 # the pipeline runs without them), and a class statement needs its base class
@@ -276,7 +276,7 @@ def train(
     batch_size: int = BATCH_SIZE,
     learning_rate: float = LEARNING_RATE,
     limit: int | None = None,
-    confidence_threshold: float | None = None,  # Added by Ankita 11 Aug
+    confidence_threshold: float | None = None,  # Added (v1.2)
     output_dir: Path = MODEL_DIR,
 ) -> dict:
     import torch
@@ -295,7 +295,7 @@ def train(
     test_df = load_split(TEST_CSV, limit)
     logger.info("train rows %d, test rows %d, base model %s", len(train_df), len(test_df), base_model)
 
-    # Added by Ankita 11 Aug: same balanced treatment as the linear/RNN
+    # Added (v1.2): same balanced treatment as the linear/RNN
     # trainers (decisions.md #17), computed from the train split only.
     from sklearn.utils.class_weight import compute_class_weight
 
@@ -336,7 +336,7 @@ def train(
         report_to=[],
     )
 
-    # Added by Ankita 11 Aug
+    # Added (v1.2)
     WeightedTrainer = _build_weighted_trainer_class(Trainer, nn)
     trainer = WeightedTrainer(
         model=model,
@@ -403,7 +403,7 @@ if __name__ == "__main__":
     parser.add_argument("--batch-size", type=int, default=BATCH_SIZE)
     parser.add_argument("--learning-rate", type=float, default=LEARNING_RATE)
     parser.add_argument("--limit", type=int, default=None, help="only read the first N rows of each split")
-    # Added by Ankita 11 Aug: same opt-in abstention as train_linear.py/train_rnn.py
+    # Added (v1.2): same opt-in abstention as train_linear.py/train_rnn.py
     parser.add_argument(
         "--confidence-threshold", type=float, default=None,
         help="abstain below this confidence; logs coverage and accuracy_at_threshold",

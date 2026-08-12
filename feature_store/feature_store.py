@@ -1,6 +1,6 @@
 """Persist engineered hotel-review features to a SQLite feature store."""
 
-# Added by Ankita 10 Aug: needed for run snapshotting
+# Added (v1.2): needed for run snapshotting
 import datetime as dt
 import hashlib
 import sqlite3

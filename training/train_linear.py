@@ -46,7 +46,7 @@ MODELS = {
 
 # Recurrent models (RNN / LSTM / BiLSTM) deliberately do **not** live here:
 # they consume an ordered sequence of token ids, not the TF-IDF matrix this
-# module is built around. See training/train_rnn.py (added 10 Aug - Ankita).
+# module is built around. See training/train_rnn.py (v1.2).
 
 DEFAULT_MODEL = "logreg"
 
@@ -92,7 +92,7 @@ def roc_auc(model, X_test, y_test) -> dict:
     return aucs
 
 
-# Added by Ankita 10 Aug: a forced 3-way call caps accuracy on this data - the
+# Added (v1.2): a forced 3-way call caps accuracy on this data - the
 # NEUTRAL band is genuinely ambiguous *text*, not just a fuzzy label, so no
 # amount of tuning gets a forced guess much past ~67% (see decisions.md #17/#3).
 # Letting the model abstain below a confidence threshold instead of guessing
@@ -162,7 +162,7 @@ def run_params(
             "train_csv": TRAIN_CSV.name,
             "test_csv": TEST_CSV.name,
             "vectorizer": VECTORIZER_PATH.name,
-            # Added by Ankita 10 Aug
+            # Added (v1.2)
             "confidence_threshold": confidence_threshold if confidence_threshold is not None else "none",
         }
     )
@@ -172,7 +172,7 @@ def run_params(
 def train(
     model_name: str = DEFAULT_MODEL,
     limit: int | None = None,
-    confidence_threshold: float | None = None,  # Added by Ankita 10 Aug
+    confidence_threshold: float | None = None,  # Added (v1.2)
 ) -> dict:
     train_df = load_split(TRAIN_CSV, limit)
     test_df = load_split(TEST_CSV, limit)
@@ -216,7 +216,7 @@ def train(
         logger.info("MLflow run id: %s (experiment %s)", run.run_id, tracking.EXPERIMENT_NAME)
 
     logger.info("macro-F1 %.4f, accuracy %.4f", metrics["macro_f1"], metrics["accuracy"])
-    # Added by Ankita 10 Aug
+    # Added (v1.2)
     if "accuracy_at_threshold" in metrics and metrics["accuracy_at_threshold"] is not None:
         logger.info(
             "confidence >= %.2f: coverage %.1f%%, accuracy %.4f",
@@ -231,7 +231,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--model", default=DEFAULT_MODEL, choices=sorted(MODELS))
     parser.add_argument("--limit", type=int, default=None, help="only read the first N rows")
-    # Added by Ankita 10 Aug: optional abstention - only count a prediction when
+    # Added (v1.2): optional abstention - only count a prediction when
     # confident, and report coverage + accuracy on the covered subset instead of
     # forcing a guess on every review.
     parser.add_argument(
