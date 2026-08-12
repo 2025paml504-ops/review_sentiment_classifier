@@ -25,7 +25,7 @@ data/processed/train_v1.csv + test_v1.csv  +  model_store/tfidf_vectorizer_v1.pk
         ├─ train_rnn          → model_store/rnn_lstm_v1.pt         + training/metrics_rnn_lstm.json
         └─ train_transformer  → model_store/bert_mini_v1/          + training/metrics_transformer.json
 
-all four training stages ──▶ training/tracking.py ──▶ mlflow.db + mlartifacts/
+all four training stages ──▶ training/tracking.py ──▶ mlflow.db + mlruns/
 ```
 
 ## Stages
@@ -42,7 +42,7 @@ all four training stages ──▶ training/tracking.py ──▶ mlflow.db + ml
    fixed phrases like `no one` are left split — see
    [Decisions §10, §21](design/decisions.md). The `No Positive`/`No Negative`
    placeholder is stripped at the source, before it can leak into any text
-   column — see [Decisions §22](design/decisions.md).
+   column — see [Decisions §1](design/decisions.md).
    Rows whose `clean_review` comes out empty (text was only placeholders or
    non-letters) are dropped after cleaning.
 
@@ -78,8 +78,15 @@ all four training stages ──▶ training/tracking.py ──▶ mlflow.db + ml
    Fine-tunes a pretrained BERT-mini encoder on the same splits, so its
    macro-F1 is directly comparable to the other three.
 
-Every training run logs to MLflow (see [Versioning](versioning.md)) and all
-four are comparable in the terminal with `python -m training.compare_runs`.
+
+
+
+## Schema contract
+
+`validation/feature_column.json` is the single source of truth for the feature
+columns and their dtypes. `validation/validate_data.py` loads it at runtime, so
+adding or renaming a validated column is a one-line JSON edit — no code change.
+See [Contributing](contributing.md) for the recipe.
 
 ## Diagnostics (not part of the DAG)
 
@@ -90,9 +97,31 @@ and duplicates that survived the dedupe. Each check prints `[OK]` or an
 `[ISSUE]` line with counts, examples, and the fix it expects. It is a report
 only: it writes nothing and always exits 0, so run it after any cleaning change.
 
-## Schema contract
+## Experiment tracking
 
-`validation/feature_column.json` is the single source of truth for the feature
-columns and their dtypes. `validation/validate_data.py` loads it at runtime, so
-adding or renaming a validated column is a one-line JSON edit — no code change.
-See [Contributing](contributing.md) for the recipe.
+Every training run also logs to **MLflow** (`training/tracking.py`):
+`start_run(...)` auto-attaches the git commit/dirty state, a feature-store
+snapshot, `dvc.lock`, and a `pip freeze` snapshot before the trainer logs its
+own params/metrics — stored in `mlflow.db` / `mlruns/` (git-ignored,
+regenerable). Model versioning is three layers: `dvc.lock` pins each model's
+exact hash per commit, the `_v1` filename gets overwritten every retrain, and
+MLflow keeps an immutable per-run copy for `logreg`/`linear_svc` only — the
+RNN and transformer have no such copy, so `dvc.lock` is their only way back to
+an old version. Compare runs with `mlflow ui --backend-store-uri
+sqlite:///mlflow.db` or `python -m training.compare_runs` (`--md` writes
+[`docs/model_leaderboard.md`](model_leaderboard.md), ranked by each model's
+best run, not latest). See [Decisions §16](design/decisions.md).
+
+## Reproducibility
+
+Same inputs and same code give the same outputs here: `RANDOM_STATE = 42`
+(`features/vectorize.py`) is threaded through the split, every sklearn
+estimator, `torch.manual_seed` plus the RNN's `DataLoader` generator, and
+HuggingFace's `set_seed()` / `Trainer(seed=...)` — verified directly, since
+re-running the RNN reproduces identical loss values at a given epoch.
+`feature_store.snapshot()` fingerprints the data (sha256, row count, label
+distribution) so "which data" is a hash, not a mutable path, and every
+hyperparameter is logged per run, not just the saved model. The one real gap:
+`requirements.txt` pins no versions, so a fresh install can silently diverge —
+the `pip freeze` snapshot above reveals that drift after the fact, it does not
+prevent it. See [Decisions §21](design/decisions.md).

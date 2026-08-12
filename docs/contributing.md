@@ -90,6 +90,6 @@ Match the existing code when adding new work:
       parameters, metrics and artifacts.
 - [ ] Commit `dvc.lock` and any `*.dvc` pointer files **with** the code change.
 - [ ] Do **not** commit files under `data/`, `feature_store/*.db`,
-      `model_store/*`, `mlflow.db` or `mlartifacts/` — these are DVC-tracked
-      or regenerable, and git-ignored.
+      `model_store/*`, `mlflow.db`, `mlruns/` or `mlartifacts/` — these are
+      DVC-tracked or regenerable, and git-ignored.
 - [ ] `dvc push` if you have access to a shared remote.

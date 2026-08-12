@@ -20,7 +20,7 @@ and every training run is recorded as an MLflow experiment run.
 | **`feature_store/`** | `feature_store.py` — persists features to SQLite (`feature_store.db`, table `hotel_review_features`) |
 | **`model_store/`**   | Persisted model artifacts, one set per trained model             |
 | **`training/`**  | Four trainers (`train_linear.py`, `train_rnn.py`, `train_transformer.py`), `tracking.py` (MLflow), `compare_runs.py` (leaderboard) |
-| **`mlflow.db`, `mlartifacts/`** | Local MLflow tracking store — one record per run; git-ignored |
+| **`mlflow.db`, `mlruns/`** | Local MLflow tracking store — one record per run; git-ignored |
 | **`serving/`, `ui/`** | Reserved — inference API and UI                                  |
 
 ## Data flow (DVC DAG)

@@ -1,6 +1,6 @@
 # Data & artifact versioning (DVC)
 
-[← Back to README](../README.md) · Related: [Dataset](dataset.md) · [Pipeline](versioning.md)
+[← Back to README](../README.md) · Related: [Dataset](dataset.md) · [Pipeline](pipeline.md)
 
 Data and model artifacts are versioned with **[DVC](https://dvc.org)**, which
 works alongside git: git tracks small text pointers (`dvc.yaml`, `dvc.lock`,
@@ -58,18 +58,14 @@ column schema in `validation/feature_column.json`.
 
 ## Version history
 
-| Version | Change | Impact |
-|---|---|---|
-| **v1** | Original `main`: cleaning → Scheme A thresholds → TF-IDF fit on train only. | Baseline. |
-| **1.1** | Cleaning overhaul: contraction expansion, negation attachment (`not good` → `not_good`), earlier de-duplication, and the `diagnose_cleaning` diagnostic. | 504,731 rows. Thresholds/schema unchanged. |
-| **1.2** | Four training stages + MLflow experiment tracking added. A negation-scope bug (6.9% of rows) and a placeholder leak into `full_review` (31% of rows) were found and fixed. Several tuning experiments were tried and measured, then rolled back when they didn't help — see [Decisions](design/decisions.md) for what was tried and why. Also added a markdown leaderboard export (`docs/leaderboard.md`, one row per model's latest completed run) and per-run `pip freeze` logging, closing the library-version reproducibility gap. | New model artifacts per stage; 503,446 rows after the dedup fix; data contract unchanged. |
+| Version | Change | Impact | [Decisions](design/decisions.md) sections |
+|---|---|---|---|
+| **v1** | Original `main`: cleaning → Scheme A thresholds → TF-IDF fit on train only. | Baseline. | §1–9 |
+| **1.1** | Cleaning overhaul: contraction expansion, negation attachment (`not good` → `not_good`), earlier de-duplication, and the `diagnose_cleaning` diagnostic. | 504,731 rows. Thresholds/schema unchanged. | §10–12 |
+| **1.2** | Four training stages + MLflow experiment tracking added. A negation-scope bug (6.9% of rows) and a placeholder leak into `full_review` (31% of rows) were found and fixed. Several tuning experiments were tried and measured, then rolled back when they didn't help. Also added a markdown leaderboard export (`docs/model_leaderboard.md`, one row per model's best completed run) and per-run `pip freeze` logging, closing the library-version reproducibility gap. | New model artifacts per stage; 503,446 rows after the dedup fix; data contract unchanged. | §13–20, most of §21 |
+| **1.3** | Leaderboard now ranks by each model's best run, not latest; renamed to `docs/model_leaderboard.md`. Fixed a doc inaccuracy (`mlartifacts/` → `mlruns/`) and added a Reproducibility section. RNN epochs re-verified — 3 remains best. | Documentation and tooling only; no data-contract change. | §21 (RNN re-verification row) |
 
-## Experiment tracking
-
-Every training run also logs to **MLflow** (`training/tracking.py`): params,
-metrics, tags, and artifacts including `dvc.lock` as the dataset reference —
-stored in `mlflow.db` / `mlartifacts/` (git-ignored, regenerable). To
-reproduce a run: read its `git_commit` tag, check it out, `dvc checkout`, and
-re-run with the logged parameters. Compare runs with `mlflow ui
---backend-store-uri sqlite:///mlflow.db` or `python -m training.compare_runs`.
-See [Decisions §16](design/decisions.md).
+Experiment tracking (MLflow) and reproducibility are covered in
+[Pipeline](pipeline.md#experiment-tracking), not here — this file is DVC's
+side of versioning specifically; that one covers what happens once a stage
+actually runs.
