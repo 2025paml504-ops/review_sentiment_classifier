@@ -62,7 +62,7 @@ column schema in `validation/feature_column.json`.
 |---|---|---|
 | **v1** | Original `main`: cleaning → Scheme A thresholds → TF-IDF fit on train only. | Baseline. |
 | **1.1** | Cleaning overhaul: contraction expansion, negation attachment (`not good` → `not_good`), earlier de-duplication, and the `diagnose_cleaning` diagnostic. | 504,731 rows. Thresholds/schema unchanged. |
-| **1.2** | Four training stages + MLflow experiment tracking added. A negation-scope bug (6.9% of rows) and a placeholder leak into `full_review` (31% of rows) were found and fixed. Several tuning experiments were tried and measured, then rolled back when they didn't help — see [Decisions](design/decisions.md) for what was tried and why. | New model artifacts per stage; 503,446 rows after the dedup fix; data contract unchanged. |
+| **1.2** | Four training stages + MLflow experiment tracking added. A negation-scope bug (6.9% of rows) and a placeholder leak into `full_review` (31% of rows) were found and fixed. Several tuning experiments were tried and measured, then rolled back when they didn't help — see [Decisions](design/decisions.md) for what was tried and why. Also added a markdown leaderboard export (`docs/leaderboard.md`, one row per model's latest completed run) and per-run `pip freeze` logging, closing the library-version reproducibility gap. | New model artifacts per stage; 503,446 rows after the dedup fix; data contract unchanged. |
 
 ## Experiment tracking
 
