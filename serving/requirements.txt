@@ -1,0 +1,12 @@
+# Serving-only dependencies (M4, added 12-Aug). Deliberately not the root
+# requirements.txt: this is the whole set the API actually imports at
+# runtime (pandas via features.build_features, scikit-learn/joblib to
+# unpickle the model + vectorizer, fastapi/uvicorn for the API itself) -
+# torch/transformers/mlflow/dvc/kaggle are training-time only and would
+# otherwise bloat the serving image by ~2GB for nothing this endpoint uses.
+pandas
+numpy
+scikit-learn
+joblib
+fastapi
+uvicorn

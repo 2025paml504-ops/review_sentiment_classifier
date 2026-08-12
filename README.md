@@ -38,7 +38,8 @@ instead to stop at the fast linear baseline.
 | `model_store/`   | Persisted model artifacts, one set per trained model              |
 | `training/`      | Four trainers, MLflow tracking (`tracking.py`), leaderboard (`compare_runs.py`) |
 | `mlflow.db`, `mlruns/` | Local MLflow tracking store (git-ignored, regenerable)  |
-| `serving/`, `ui/`| Reserved for serving and UI                                      |
+| `serving/`       | FastAPI REST API (`/health`, `/predict`) serving `logreg`; `Dockerfile` at repo root packages it |
+| `ui/`            | Reserved — not yet built                                          |
 
 ## Documentation
 
@@ -64,4 +65,6 @@ BERT-mini fine-tune — trained on the same splits and compared on macro-F1.
 Every run is tracked in MLflow, so results are comparable and reproducible.
 See [Decisions §13–20](docs/design/decisions.md) for what was built, and
 [Decisions §21](docs/design/decisions.md) for the tuning experiments tried and
-(where they didn't help) reverted. `serving/` and `ui/` remain reserved.
+(where they didn't help) reverted. `serving/` now has a working REST API
+([serving/README.md](serving/README.md), [Decisions §22](docs/design/decisions.md));
+`ui/` remains reserved.

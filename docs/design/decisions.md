@@ -407,3 +407,40 @@ prior value — it does not mean the experiment was wasted. Each one is a
 negative result worth having on record, in the same spirit as §12's cleaning
 diagnostics: a documented dead end is what stops the next person (including a
 future run of this same project) from re-spending the time to re-discover it.
+
+## 22. Serving `logreg`, not the highest-scoring model (v1.4)
+
+**Context.** M4 requires a REST API serving one trained model. Four exist;
+`bert_mini` has the best macro-F1 (0.6685 historically; 0.6461 on current
+data), but every trained model is a legitimate candidate.
+
+**Decision.** `serving/app.py` (FastAPI) serves `logreg`, loading
+`model_store/logreg_v1.pkl` and the fitted vectorizer once at startup, not
+per-request. Input is validated in three layers: Pydantic's `min_length=1`
+rejects an empty string, a custom validator rejects whitespace-only text, and
+a post-`clean_text()` check rejects text that cleans down to nothing
+(punctuation/numbers/placeholder content) — the same "empty document" case
+`build_features()` already drops at training time (§1). Malformed JSON, a
+missing field, or a wrong type are caught by FastAPI's built-in validation.
+Every response includes its own `latency_ms`.
+
+**Rationale.** Serving latency is a different constraint than training-time
+macro-F1. `logreg` loads from a small pickle in milliseconds and needs only
+`pandas`/`scikit-learn`/`joblib` at runtime; `bert_mini` needs `torch` and
+`transformers` resident in memory just to answer one request — multiple
+seconds of cold-start weight, and a ~2GB dependency footprint, for a macro-F1
+gain that's marginal on current data (0.6461 vs. `logreg`'s 0.6252) and not
+worth the latency cost for a first API. Measured locally: ~336 req/s,
+~3ms/request average, sequential, no batching — see [serving/README.md](../../serving/README.md).
+Loading the model once at import time, not per-request, is what makes that
+number meaningful; reloading a pickle on every call would dominate latency
+far more than inference itself does.
+
+**Alternatives.** Serving `bert_mini` — rejected for the latency/dependency
+cost above; revisit once there's an actual accuracy requirement that
+justifies it. A `--model` query param to pick any of the four at request time
+— more flexible, but multiplies the validation/testing surface for a first
+version, and mixing model families behind one endpoint blurs which one a
+caller actually got. Silently returning a low-confidence prediction on blank
+input instead of a `422` — rejected: a prediction on no real content is worse
+than an honest error, and it would go undetected by whoever's calling the API.

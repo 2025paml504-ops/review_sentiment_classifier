@@ -25,5 +25,9 @@ tiktoken
 
 # Recurrent baseline (training/train_rnn.py) reuses `torch` above - no extra
 # dependency. It is deliberately *not* Keras: TensorFlow publishes no wheels
-# for the Python 3.14 this project runs on. Added 10 Aug - Ankita.
+# for the Python 3.14 this project runs on. Added (v1.2).
+
+# Serving (serving/app.py): the REST API, added (v1.4).
+fastapi
+uvicorn
 
