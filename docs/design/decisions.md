@@ -253,8 +253,8 @@ understates what the transformer could actually do. Feeding it raw
 `full_review` instead was tried and reverted (§21).
 
 **Alternatives.** Frozen sentence-transformer embeddings are cheaper but
-usually land well below a full fine-tune. A hosted LLM API was ruled out -
-not open source, per-call cost, and nothing reproducible to version.
+usually land well below a full fine-tune. A hosted third-party API was ruled
+out - not open source, per-call cost, and nothing reproducible to version.
 
 ## 16. MLflow for experiment tracking (v1.2)
 
