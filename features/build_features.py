@@ -29,23 +29,22 @@ NEGATORS = {"not", "no", "never", "cannot", "nor"}
 #     "and", "or", "but", "that", "this", "is", "are", "was", "were", "in",
 #     "on", "at", "for", "as", "one", "any", "there", "my", "our", "you",
 # }
-# Added (v1.2): "the", "a", "an" and "that" moved out to
-# NEGATION_SKIP_THROUGH below - those should be skipped *past* to reach the
-# real target, not treated as a hard stop, or "not the best" leaves "best"
-# completely unmarked (confirmed on 6.9% of rows). "one" and the rest stay
-# here as a hard stop - "no one" is a fixed phrase, not a negator + filler.
+# Added (v1.2): moved "the", "a", "an" and "that" out to
+# NEGATION_SKIP_THROUGH below - those need to be skipped past to reach the
+# real target. Without that, "not the best" left "best" completely unmarked
+# (this was happening on 6.9% of rows). "one" and the rest stay here as a
+# hard stop, since "no one" is a fixed phrase, not negator + filler.
 NEGATION_SKIP_WORDS = {
     "be", "to", "of", "i", "it", "we", "they", "he", "she",
     "and", "or", "but", "this", "is", "are", "was", "were", "in",
     "on", "at", "for", "as", "one", "any", "there", "my", "our", "you",
 }
 
-# Added (v1.2): determiners/demonstratives/intensifiers that sit
-# between a negator and its real target rather than being the target
-# themselves or blocking the merge. Distinct from NEGATION_SKIP_WORDS above:
-# "no one" must stay split (a fixed phrase, "one" is a hard stop), but
-# "not the best" / "not very good" / "not that great" should skip past the
-# filler to reach "best"/"good"/"great" - confirmed missing on 6.9% of rows.
+# Added (v1.2): words that sit between a negator and its real target - "not
+# the best", "not very good", "not that great" - and should be skipped past
+# rather than blocking the merge. Different from NEGATION_SKIP_WORDS above:
+# "no one" stays split since it's a fixed phrase, but these should let the
+# negator reach "best"/"good"/"great". Missing this was affecting 6.9% of rows.
 NEGATION_SKIP_THROUGH = {
     "the", "a", "an", "that", "very", "really", "so", "too", "quite",
     "pretty", "extremely",
@@ -63,27 +62,27 @@ CONTRACTIONS = {
     "needn't": "need not"
 }
 
-# Added (v1.1): Single compiled alternation (word-bounded) instead of
-# one str.replace pass per entry; longest keys first so no key masks a longer one.
+# Added (v1.1): one compiled regex instead of a str.replace pass per entry.
+# Longest keys go first so a short key can't mask a longer one.
 _CONTRACTIONS_RE = re.compile(
     r"\b(" + "|".join(re.escape(c) for c in sorted(CONTRACTIONS, key=len, reverse=True)) + r")\b"
 )
 # Added (v1.1): Curly apostrophe (U+2019) normalized to ASCII apostrophe.
 _CURLY_APOSTROPHE = "\u2019"
-# Added (v1.1): Some reviews spell contractions with spaces around the
+# Added (v1.1): some reviews spell contractions with spaces around the
 # apostrophe ("don ' t"), which escaped _CONTRACTIONS_RE and shattered into
 # "don" + "t". Collapse the spacing before contraction expansion runs.
 _SPACED_APOSTROPHE_RE = re.compile(r"\s*'\s*")
-# Added (v1.1): Catch-all for the long tail. The apostrophe form is
-# generic; bare forms are listed explicitly so real words (went, want) are safe.
+# Added (v1.1): catches the long tail. The apostrophe form is generic; the
+# bare forms are spelled out explicitly so real words like "went"/"want" stay safe.
 _NT_RE = re.compile(
     r"n't\b|\b(?:do|does|did|is|are|was|were|has|have|had|could|should|would|must|ai|ca|wo)nt\b"
 )
 
 
-# Added (v1.1): Repair for reviews where the apostrophe is missing
-# entirely ("if you don t mind"), which the contraction pass cannot see. Stems
-# are listed explicitly so ordinary "<word> t" sequences stay untouched.
+# Added (v1.1): fixes reviews where the apostrophe is missing entirely
+# ("if you don t mind"), which the contraction pass can't catch. Stems are
+# spelled out explicitly so ordinary "<word> t" sequences stay untouched.
 _SPLIT_NT_STEMS = {
     "don": "do", "doesn": "does", "didn": "did", "isn": "is", "aren": "are",
     "wasn": "was", "weren": "were", "hasn": "has", "haven": "have",
@@ -107,13 +106,13 @@ def _expand_nt(match: re.Match) -> str:
 # Sentiment label thresholds on Reviewer_Score (Scheme A): NEG < 6, 6 <= NEU < 8, POS >= 8.
 # Produced a 10.3 / 24.9 / 64.8 split; picked by hand to be "the least imbalanced
 # observed", not from an external convention.
-# NPS-style thresholds tried (v1.2) (Promoter 9-10 / Passive 7-8 /
-# Detractor 0-6): raised macro-F1 and NEGATIVE/NEUTRAL detection on every one
-# of the four models (e.g. logreg macro-F1 0.618 -> 0.647), but *lowered* raw
-# accuracy on all of them (e.g. LinearSVC 71.8% -> 65.1%) because the old
-# scheme's 65%-POSITIVE imbalance is exactly what inflates accuracy without
-# reflecting real quality. Reverted (v1.2): accuracy is the number
-# that needs to read higher here, so back to Scheme A.
+# Also tried NPS-style thresholds (v1.2): Promoter 9-10 / Passive 7-8 /
+# Detractor 0-6. This raised macro-F1 and NEGATIVE/NEUTRAL detection across
+# all four models (logreg went 0.618 -> 0.647), but lowered raw accuracy on
+# all of them too (LinearSVC dropped from 71.8% to 65.1%) - the old scheme's
+# 65% POSITIVE share is exactly what was inflating accuracy in the first
+# place. Reverted back to Scheme A since accuracy is the number that needs
+# to read higher here.
 # SENTIMENT_NEUTRAL_FLOOR = 7.0
 # SENTIMENT_POSITIVE_FLOOR = 9.0
 SENTIMENT_NEUTRAL_FLOOR = 6.0
@@ -151,15 +150,14 @@ def combine_reviews(df: pd.DataFrame) -> pd.DataFrame:
     # negative = df["Negative_Review"].fillna("")
     # df["full_review"] = (positive + " " + negative).str.strip()
     #
-    # Bug found (v1.2): full_review was only ever meant to feed
-    # clean_text() (which strips "No Positive"/"No Negative" internally), so
-    # nothing stripped the placeholder from full_review itself. Once a
-    # consumer reads full_review directly (the transformer, for raw-text
-    # input), it sees the literal placeholder as real text - confirmed on 31%
-    # of rows (156,389 / 504,731). Stripped here at the field level (only when
-    # a field IS the bare placeholder) instead: more precise than the
-    # substring match in clean_text()'s _PLACEHOLDER_RE, which can also catch
-    # the phrase inside genuine text (a rare false positive, ~0.07% of rows).
+    # Bug found (v1.2): full_review was only ever meant to feed into
+    # clean_text(), which strips "No Positive"/"No Negative" internally - so
+    # nothing was stripping the placeholder from full_review itself. Anything
+    # reading full_review directly (the transformer's raw-text input) saw the
+    # literal placeholder as real text, on 31% of rows (156,389 / 504,731).
+    # Stripped here instead, at the field level, only when a field IS the
+    # bare placeholder - more precise than clean_text()'s substring match,
+    # which can also catch the phrase inside genuine text (~0.07% of rows).
     positive = df["Positive_Review"].fillna("")
     negative = df["Negative_Review"].fillna("")
     positive = positive.where(positive.str.strip().str.lower() != "no positive", "")
@@ -187,13 +185,13 @@ def combine_reviews(df: pd.DataFrame) -> pd.DataFrame:
 #             result.append(token)
 #     return result
 #
-# Bug found (v1.2): the version above only ever looked one token
-# ahead, and gave up entirely (leaving the negator standing alone) when that
-# token was a function word - so "not the best" / "not that great" / "not a
-# good experience" left "best"/"great"/"good" completely unmarked, a raw
-# positive token in the bag of words. Confirmed on 6.9% of rows
-# (34,610 / 504,731). Fixed below: skip past up to MAX_NEGATION_SKIP
-# determiners/intensifiers to reach the real sentiment target.
+# Bug found (v1.2): the version above only looked one token ahead, and gave
+# up entirely - leaving the negator standing alone - whenever that token was
+# a function word. So "not the best" / "not that great" / "not a good
+# experience" left "best"/"great"/"good" completely unmarked, sitting in the
+# bag of words as a raw positive token. This affected 6.9% of rows
+# (34,610 / 504,731). Fixed below by skipping past up to MAX_NEGATION_SKIP
+# determiners/intensifiers to reach the real target.
 MAX_NEGATION_SKIP = 3  # Added (v1.2)
 
 

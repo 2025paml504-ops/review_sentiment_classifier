@@ -1,10 +1,9 @@
 """FastAPI serving layer for the sentiment classifier (M4, added 12-Aug).
 
-Serves the default `logreg` model + its fitted TF-IDF vectorizer behind a REST
-API. `logreg` is used here, not `bert_mini`, because serving needs to load and
-respond fast: `logreg` loads from a small pickle in milliseconds with no heavy
-ML runtime, while `bert_mini` needs `torch`/`transformers` resident in memory
-just to answer one request - see Decisions §22 for the full tradeoff.
+Serves the logreg model and its TF-IDF vectorizer over a REST API. logreg is
+used here instead of bert_mini mainly for speed - it loads from a small
+pickle in milliseconds, while bert_mini needs torch/transformers loaded just
+to answer one request. See Decisions §22 for the full reasoning.
 
 Run locally:
 
@@ -12,9 +11,9 @@ Run locally:
 
 Endpoints:
 
-    GET  /health   - liveness check + which model is loaded
+    GET  /health   - is it up, and which model is loaded
     POST /predict  - {"text": "..."} -> sentiment, confidence, per-class
-                      probabilities, and the request's own latency
+                      probabilities, and how long the request took
 """
 
 import logging
@@ -32,15 +31,13 @@ logger = logging.getLogger("serving")
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 MODEL_PATH = REPO_ROOT / "model_store" / "logreg_v1.pkl"
-# Path duplicated from features/vectorize.py rather than imported: importing
-# that module pulls in feature_store.py -> SQLAlchemy transitively, for one
-# path constant serving doesn't otherwise need. Keeps the serving image's
-# real dependency chain to pandas/numpy/scikit-learn/joblib only.
+# Duplicated from features/vectorize.py instead of imported - importing that
+# module drags in feature_store.py and SQLAlchemy for one path constant this
+# file doesn't otherwise need.
 VECTORIZER_PATH = REPO_ROOT / "model_store" / "tfidf_vectorizer_v1.pkl"
 MODEL_NAME = "logreg"
 
-# Bounds vectorizer/inference cost per request and rejects obvious abuse
-# before it ever reaches the model.
+# Keeps per-request cost predictable and rejects obvious abuse.
 MAX_TEXT_LENGTH = 5000
 
 app = FastAPI(
@@ -49,8 +46,8 @@ app = FastAPI(
     version="1.0",
 )
 
-# Loaded once at import time, not per-request: reloading a pickle on every
-# call would dominate latency far more than the actual prediction does.
+# Load once at startup, not per request - reloading a pickle every call would
+# cost far more than the prediction itself.
 try:
     _model = joblib.load(MODEL_PATH)
     _vectorizer = joblib.load(VECTORIZER_PATH)
@@ -69,8 +66,8 @@ class PredictRequest(BaseModel):
     @field_validator("text")
     @classmethod
     def not_blank(cls, value: str) -> str:
-        # min_length=1 only rejects a literally empty string; "   " passes
-        # that check but is blank in every way that matters.
+        # min_length=1 only catches a literally empty string; "   " gets past
+        # that but is blank in every way that matters.
         if not value.strip():
             raise ValueError("text must not be blank")
         return value
@@ -100,10 +97,10 @@ def predict(request: PredictRequest) -> PredictResponse:
     start = time.perf_counter()
     cleaned = clean_text(request.text)
     if not cleaned.strip():
-        # Text that is only punctuation/numbers/placeholder phrases cleans
-        # down to nothing - the same "empty document" case build_features()
-        # drops at training time (Decisions §1). Serving rejects it too
-        # rather than silently scoring an all-zero feature row.
+        # Punctuation/numbers/placeholder-only text cleans down to nothing -
+        # the same empty-document case build_features() drops during
+        # training (Decisions §1). Reject it here too instead of scoring an
+        # all-zero row.
         raise HTTPException(
             status_code=422,
             detail="Text cleaned to an empty document (only punctuation, numbers, "

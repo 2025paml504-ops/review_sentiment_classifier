@@ -1,7 +1,6 @@
 # Serves the sentiment classifier's REST API (M4, added 12-Aug).
-# Builds a lean image via serving/requirements.txt, not the root
-# requirements.txt - see that file for why (avoids ~2GB of training-only
-# torch/transformers this endpoint never imports).
+# Uses serving/requirements.txt instead of the root requirements.txt to keep
+# the image lean - see that file for why.
 FROM python:3.12-slim
 
 WORKDIR /app
@@ -9,8 +8,8 @@ WORKDIR /app
 COPY serving/requirements.txt serving/requirements.txt
 RUN pip install --no-cache-dir -r serving/requirements.txt
 
-# Only what serving/app.py actually imports: features/build_features.py for
-# clean_text(), and the trained model + vectorizer it serves.
+# Just what serving/app.py needs: build_features.py for clean_text(), and
+# the trained model + vectorizer it serves.
 COPY features/__init__.py features/
 COPY features/build_features.py features/
 COPY serving/ serving/

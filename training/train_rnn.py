@@ -197,8 +197,8 @@ def class_weights(y_train: np.ndarray) -> dict[int, float]:
 
 
 # Added (v1.2): confidence_threshold param, mirroring train_linear.py's
-# evaluate() - same abstention idea (defer instead of forcing a guess), reusing
-# the softmax probabilities already computed for ROC-AUC, no extra cost.
+# evaluate() - same abstention idea, deferring instead of forcing a guess.
+# Reuses the softmax probabilities already computed for ROC-AUC, so it's free.
 def full_metrics(y_true, y_pred, probabilities=None, confidence_threshold: float | None = None) -> dict:
     """Score in the *same shape* as the other two trainers."""
     from sklearn.metrics import (

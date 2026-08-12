@@ -1,37 +1,38 @@
 """MLflow experiment tracking for the training stages (v1.2).
 
-A saved `.pkl` records *what* the model is, never *how* it got there. This
-module adds the missing half: every training run logs its parameters, metrics,
-tags and artifacts to MLflow, so a run can be compared against the others and
+A saved `.pkl` records what the model is, never how it got there. This module
+adds the missing half: every training run logs its parameters, metrics, tags
+and artifacts to MLflow, so a run can be compared against the others and
 reproduced from its record alone.
 
-`mlflow` is a **required** dependency (declared in `requirements.txt`) and is
-imported at module level like any other: tracking is part of the pipeline, not
-an optional add-on. A run that cannot be tracked is a run that cannot be
-reproduced, so it fails loudly rather than silently training untracked.
+`mlflow` is a required dependency, declared in `requirements.txt` and
+imported at module level like any other - tracking is part of the pipeline,
+not an optional add-on. A run that can't be tracked can't be reproduced
+either, so this fails loudly instead of quietly training untracked.
 
-Design:
+The tracking URI defaults to `sqlite:///mlflow.db` at the repo root (override
+with `MLFLOW_TRACKING_URI`), so no server is needed and everything works
+offline - mlflow 3.15 put the old `./mlruns` file store into maintenance mode
+and raises on it, so SQLite is the backend now; run artifacts live under
+`mlartifacts/`. Browse both with `mlflow ui --backend-store-uri
+sqlite:///mlflow.db`.
 
-* **Local SQLite store.** The tracking URI defaults to `sqlite:///mlflow.db` at
-  the repo root (override with `MLFLOW_TRACKING_URI`), so no server is needed
-  and the lab works offline. mlflow 3.15 put the old `./mlruns` *file* store in
-  maintenance mode and raises on it, so SQLite is the supported local backend;
-  run artifacts live under `mlartifacts/`. Browse both with
-  `mlflow ui --backend-store-uri sqlite:///mlflow.db`.
-* **One experiment for the project.** Every model family lands in
-  `review_sentiment` (override with `MLFLOW_EXPERIMENT_NAME`) so the UI can rank
-  the linear baseline and the transformer against each other.
-* **Dataset reference, not just a file name.** Each run tags the git commit and
-  logs `dvc.lock`, which pins the content hash of the exact splits the model was
-  trained on (see docs/versioning.md). It also logs the **feature-store
-  snapshot** (`feature_store/snapshot.json`: sha256, row count, column types and
-  label distribution of `feature_store.db`, which is far too large to attach)
-  and the **feature schema** `validation/feature_column.json`, so a run answers
-  "which code, which data, which columns?" on its own.
-* **Environment, not just requirements.txt.** `requirements.txt` names packages
-  with no version pins, so it alone can't answer "which library versions
-  trained this?" a month later. Each run also logs `pip freeze` output
-  (`environment/pip_freeze.txt`), added (v1.2).
+Every model family lands in one shared experiment, `review_sentiment`
+(override with `MLFLOW_EXPERIMENT_NAME`), so the UI can rank the linear
+baseline against the transformer directly.
+
+Each run tags the git commit and logs `dvc.lock`, which pins the content
+hash of the exact splits the model was trained on (see docs/versioning.md).
+It also logs a feature-store snapshot (`feature_store/snapshot.json`:
+sha256, row count, column types and label distribution of `feature_store.db`,
+which is far too large to attach directly) and the feature schema
+`validation/feature_column.json`, so a run can answer "which code, which
+data, which columns?" entirely on its own.
+
+`requirements.txt` names packages but pins no versions, so on its own it
+can't answer "which library versions actually trained this" a month later.
+Each run also logs `pip freeze` output (`environment/pip_freeze.txt`), added
+in v1.2.
 
 Usage:
 
@@ -171,9 +172,9 @@ class Run:
         """Log every scalar in a (possibly nested) metrics dict."""
         mlflow.log_metrics(flatten_metrics(metrics))
 
-    # Added (v1.2): the recurrent trainer produces a value per epoch,
-    # not just a final one, and a learning curve is what tells an under-trained
-    # net apart from a plateaued one.
+    # Added (v1.2): the recurrent trainer produces a value per epoch, not
+    # just a final one - a learning curve is how you tell an under-trained
+    # net apart from one that's plateaued.
     def log_metric_step(self, key: str, value: float, step: int) -> None:
         """Log one point of a per-step metric (e.g. the loss at epoch `step`)."""
         mlflow.log_metric(key, float(value), step=step)
@@ -228,9 +229,9 @@ def log_feature_inputs(run: "Run") -> None:
     run.log_artifact(FEATURE_SCHEMA, "schema")
 
 
-# Added (v1.2): requirements.txt names packages but pins no versions,
-# so two runs months apart could train under different library versions with
-# nothing in the record to tell them apart. pip freeze closes that gap per run.
+# Added (v1.2): requirements.txt names packages but pins no versions, so two
+# runs months apart could end up training under different library versions
+# with nothing in the record to show it. pip freeze closes that gap per run.
 def log_environment(run: "Run") -> None:
     """Snapshot exact installed package versions as a per-run text artifact."""
     try:

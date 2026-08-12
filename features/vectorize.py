@@ -20,9 +20,9 @@ TEST_SIZE = 0.2
 RANDOM_STATE = 42
 
 # TF-IDF hyperparameters.
-# A wider vocabulary was tried (v1.2) to help the weak NEUTRAL class: 30k
-# trigram features (macro-F1 0.537) and 24k bigram features (macro-F1 0.556) both
-# left `saga` short of convergence at max_iter=1000 - reverted to the proven config.
+# Tried widening the vocabulary (v1.2) to help the weak NEUTRAL class: 30k
+# trigram features got macro-F1 0.537, 24k bigram features got 0.556. Both
+# left `saga` short of convergence at max_iter=1000, so reverted to this config.
 MAX_FEATURES = 20000
 NGRAM_RANGE = (1, 2)
 MIN_DF = 5

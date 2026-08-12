@@ -1,6 +1,6 @@
 # Model leaderboard
 
-Generated 2026-08-12 16:38 UTC by `python -m training.compare_runs --md`, ranked by `macro_f1`, one row per model (its best completed run). Source: MLflow (`mlflow.db`, local/git-ignored) -- re-run after training to refresh.
+Generated 2026-08-12 17:55 UTC by `python -m training.compare_runs --md`, ranked by `macro_f1`, one row per model (its best completed run). Source: MLflow (`mlflow.db`, local/git-ignored) -- re-run after training to refresh.
 
 **Best model: `rnn_lstm`** (`macro_f1` = 0.6488).
 

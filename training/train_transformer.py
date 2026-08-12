@@ -242,12 +242,11 @@ def build_dataset(df: pd.DataFrame, tokenizer):
     return ds
 
 
-# Added (v1.2): built inside train(), not at module level - Trainer
-# is one of the lazily-imported transformers symbols (module docstring: the
-# heavy deps are imported inside the functions that need them so the rest of
-# the pipeline runs without them), and a class statement needs its base class
-# at definition time, so this factory defers the class body until train() has
-# already done that import.
+# Added (v1.2): built inside train(), not at module level. Trainer is one of
+# the transformers symbols that gets imported lazily (see the module
+# docstring - heavy deps only get imported inside the functions that need
+# them), but a class statement needs its base class to already exist. So
+# this factory defers building the class until train() has done that import.
 def _build_weighted_trainer_class(Trainer, nn):
     """The stock Trainer uses unweighted cross-entropy: a documented gap
     (decisions.md #17 - "planned but never landed"). Overriding compute_loss

@@ -92,13 +92,13 @@ def roc_auc(model, X_test, y_test) -> dict:
     return aucs
 
 
-# Added (v1.2): a forced 3-way call caps accuracy on this data - the
-# NEUTRAL band is genuinely ambiguous *text*, not just a fuzzy label, so no
-# amount of tuning gets a forced guess much past ~67% (see decisions.md #17/#3).
+# Added (v1.2): a forced 3-way call caps accuracy on this data. The NEUTRAL
+# band is genuinely ambiguous text, not just a fuzzy label, so no amount of
+# tuning gets a forced guess much past ~67% (see decisions.md #17/#3).
 # Letting the model abstain below a confidence threshold instead of guessing
 # raises accuracy on what it does answer, at the cost of leaving the least
-# confident reviews unclassified. Confirmed empirically: threshold 0.6 on the
-# unweighted logreg covers 62% of reviews at 76.5% accuracy on that subset.
+# confident reviews unclassified. Checked this empirically: a 0.6 threshold
+# on the unweighted logreg covers 62% of reviews at 76.5% accuracy on that subset.
 def evaluate(model, X_test, y_test, confidence_threshold: float | None = None) -> dict:
     y_pred = model.predict(X_test)
     report = classification_report(
@@ -232,8 +232,8 @@ if __name__ == "__main__":
     parser.add_argument("--model", default=DEFAULT_MODEL, choices=sorted(MODELS))
     parser.add_argument("--limit", type=int, default=None, help="only read the first N rows")
     # Added (v1.2): optional abstention - only count a prediction when
-    # confident, and report coverage + accuracy on the covered subset instead of
-    # forcing a guess on every review.
+    # confident, and report coverage plus accuracy on that covered subset
+    # instead of forcing a guess on every review.
     parser.add_argument(
         "--confidence-threshold",
         type=float,

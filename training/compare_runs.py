@@ -8,7 +8,7 @@ proves the experiment record is actually populated without starting a server.
 Reads the same store as `training/tracking.py` and prints one row per run of the
 `review_sentiment` experiment, ranked by macro-F1: run id, model, the headline
 metrics and the reproducibility handles (git commit, feature-store hash). Smoke
-runs (`--limit`) are excluded by default -- they are not scored versions.
+runs (`--limit`) are excluded by default, since they aren't scored versions.
 
     python -m training.compare_runs                  # scored runs, best first
     python -m training.compare_runs --all            # include smoke runs
@@ -26,9 +26,9 @@ import mlflow
 
 from training import tracking
 
-# Added (v1.2): mlflow.db/mlruns are git-ignored (per-machine
-# tracking store), so scores never reach GitHub on their own. --md renders this
-# same leaderboard as a committable markdown table.
+# Added (v1.2): mlflow.db/mlruns are git-ignored, so scores never reach
+# GitHub on their own. --md renders this same leaderboard as a markdown
+# table that can actually be committed.
 DEFAULT_MD_PATH = "docs/model_leaderboard.md"
 
 # The columns that make two runs comparable at a glance. Metric names are shared
@@ -105,13 +105,13 @@ def format_table(rows: list[dict]) -> str:
     return "\n".join(lines)
 
 
-# Added (v1.3), changed from latest-per-model to best-per-model: a
-# "latest run" can be a rejected tuning experiment (e.g. an epoch count that
-# overfit and was never made the default), which would then show up as this
-# model's leaderboard entry even though it isn't what the committed code
-# produces. Best score per model avoids that -- see Decisions for the caveat
-# this doesn't handle (a lucky non-default-flag run can still outscore the
-# default one and would still win here).
+# Added (v1.3), switched from latest-per-model to best-per-model: a "latest
+# run" can be a rejected tuning experiment - say, an epoch count that
+# overfit and never became the default - and it would still show up as this
+# model's leaderboard entry, even though the committed code doesn't produce
+# it. Best score per model avoids that. See Decisions for a caveat this
+# still doesn't handle: a lucky non-default-flag run could still outscore
+# the default one and win here anyway.
 def best_per_model(rows: list[dict], sort_by: str) -> list[dict]:
     """Keep only the highest-sort_by run for each distinct model_name."""
     best: dict[str, dict] = {}
@@ -154,8 +154,8 @@ def format_markdown(rows: list[dict]) -> str:
     return "\n".join(lines)
 
 
-# Added (v1.2, timestamp added v1.3): one label:value block per model -- run
-# id, when it ran, accuracy, ROC-AUC, macro-F1 -- the compact "where do we
+# Added (v1.2, timestamp added in v1.3): one label:value block per model -
+# run id, when it ran, accuracy, ROC-AUC, macro-F1. The compact "where do we
 # stand" view, as opposed to format_table()'s full multi-column run history.
 def format_checklist(rows: list[dict]) -> str:
     """Render one label:value block per row: run id, start time, accuracy, ROC-AUC, macro-F1."""
@@ -179,9 +179,10 @@ def format_checklist(rows: list[dict]) -> str:
 
 
 # Added (v1.3): a run from before a data regen can still have a higher
-# macro-F1 than anything today's pipeline reproduces -- misleading, not
-# "best". Restrict to runs trained on the CURRENT feature store when any
-# exist, so a stale run never wins just because the data changed under it.
+# macro-F1 than anything today's pipeline actually reproduces, which makes
+# it misleading to call "best". Restrict to runs trained on the current
+# feature store when any exist, so a stale run can't win just because the
+# data changed underneath it.
 def _current_feature_store_hash() -> str | None:
     from feature_store import feature_store
 
@@ -189,10 +190,10 @@ def _current_feature_store_hash() -> str | None:
     return snapshot["sha256"][:12] if snapshot else None
 
 
-# Added (v1.2): an interrupted run (killed before evaluate() logs
-# anything) has no score at all -- drop it, one row per model (its best run),
-# ranked by sort_by. Shared by the terminal --md view and the written file so
-# both show exactly the same set.
+# Added (v1.2): an interrupted run (killed before evaluate() logs anything)
+# has no score at all, so drop it. One row per model, its best run, ranked
+# by sort_by. Shared by the terminal --md view and the written file so both
+# show exactly the same thing.
 def build_leaderboard(rows: list[dict], sort_by: str) -> list[dict]:
     scored = [row for row in rows if row.get(sort_by) is not None]
     current_hash = _current_feature_store_hash()
@@ -262,15 +263,15 @@ def main() -> None:
     if args.json:
         print(json.dumps(rows, indent=2, default=str))
     elif args.md:
-        # Added (v1.2): mirror what gets written to the .md file --
-        # one checkmark block per model's best completed run.
+        # Added (v1.2): mirrors what gets written to the .md file - one
+        # block per model's best completed run.
         leaderboard = build_leaderboard(rows, args.sort)
         print(f"Experiment: {tracking.EXPERIMENT_NAME}  (best per model, ranked by {args.sort})")
         print(format_checklist(leaderboard))
     elif args.full:
         # Added (v1.3): every run, not deduped to one-per-model, in the same
-        # readable Run ID / Started / scores format as --md -- for "show me
-        # everything, in the console, not just the leaderboard".
+        # readable Run ID / Started / scores format as --md - for when you
+        # want to see everything in the console, not just the leaderboard.
         ordered = sorted(rows, key=lambda row: row.get(args.sort) if row.get(args.sort) is not None else -1, reverse=True)
         print(f"Experiment: {tracking.EXPERIMENT_NAME}  ({len(ordered)} runs, ranked by {args.sort})")
         print(format_checklist(ordered))

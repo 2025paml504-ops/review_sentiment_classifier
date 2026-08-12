@@ -1,8 +1,8 @@
 # Serving
 
-REST API for the sentiment classifier (M4). Serves the `logreg` model —
-see [Decisions §22](../docs/design/decisions.md) for why that model, not the
-higher-scoring `bert_mini`, is what's served.
+REST API for the sentiment classifier (M4). Serves the `logreg` model, not
+the higher-scoring `bert_mini` - see [Decisions §22](../docs/design/decisions.md)
+for why.
 
 ## Run it
 
@@ -16,7 +16,7 @@ docker run -p 8000:8000 review-sentiment-api
 ```
 
 Either way, `model_store/logreg_v1.pkl` and `model_store/tfidf_vectorizer_v1.pkl`
-must already exist — run `dvc repro train` first if they don't (see
+need to already exist. Run `dvc repro train` first if they don't (see
 [Pipeline](../docs/pipeline.md)).
 
 ## Endpoints
@@ -46,8 +46,8 @@ curl -X POST http://127.0.0.1:8000/predict \
 }
 ```
 
-Negation is handled correctly (the actual bug fixed in this project — see
-[Decisions §10](../docs/design/decisions.md)):
+Negation is handled correctly - this is the bug fix from
+[Decisions §10](../docs/design/decisions.md) showing up in a live prediction:
 
 ```bash
 curl -X POST http://127.0.0.1:8000/predict \
@@ -56,7 +56,7 @@ curl -X POST http://127.0.0.1:8000/predict \
 # -> {"sentiment": "NEGATIVE", "confidence": 0.978, ...}
 ```
 
-## Edge cases (tested, not just handled in theory)
+## Edge cases (actually tested, not just handled in theory)
 
 | Input | Response |
 |---|---|
@@ -72,6 +72,6 @@ curl -X POST http://127.0.0.1:8000/predict \
 
 Measured locally (`logreg` on TF-IDF, sequential requests, no batching):
 **~336 req/s, ~3ms/request average**, including HTTP overhead. `logreg` is
-fast enough that this is dominated by request handling, not the model itself
-— see [Decisions §22](../docs/design/decisions.md) for why that mattered in
+fast enough that request handling costs more than the model does. See
+[Decisions §22](../docs/design/decisions.md) for why that mattered when
 choosing which model to serve.
