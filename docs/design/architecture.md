@@ -21,8 +21,7 @@ and every training run is recorded as an MLflow experiment run.
 | **`model_store/`**   | Persisted model artifacts, one set per trained model             |
 | **`training/`**  | Four trainers (`train_linear.py`, `train_rnn.py`, `train_transformer.py`), `tracking.py` (MLflow), `compare_runs.py` (leaderboard) |
 | **`mlflow.db`, `mlruns/`** | Local MLflow tracking store — one record per run; git-ignored |
-| **`serving/`**   | `app.py` — FastAPI REST API serving `logreg` (§22); `/health`, `/predict`. `Dockerfile` at repo root packages it. |
-| **`ui/`**        | Reserved — not yet built                                          |
+| **`serving/`, `ui/`** | Reserved — inference API and UI                                  |
 
 ## Data flow (DVC DAG)
 
@@ -88,7 +87,5 @@ See [Decisions](decisions.md) for *why* each was chosen.
 - **A new model** → `training/`: consume the persisted splits + fitted
   vectorizer, wrap the fit in `training.tracking.start_run(...)`, save the
   artifact to `model_store/` (versioned), and add a stage to `dvc.yaml`.
-- **Serving** → `serving/app.py`: built — a FastAPI REST API (`/health`,
-  `/predict`) serving `logreg` from `model_store/`, packaged via the root
-  `Dockerfile` (§22).
-- **UI** → `ui/`: front-end over the serving API, not yet built.
+- **Serving** → `serving/`: load the vectorizer + model from `model_store/` behind an API.
+- **UI** → `ui/`: front-end over the serving API.
