@@ -45,12 +45,12 @@ unchanged.
 
 The `_v1` suffix (`train_v1.csv`, `tfidf_vectorizer_v1.pkl`, `logreg_v1.pkl`,
 `linear_svc_v1.pkl`, `rnn_lstm_v1.pt`, `bert_mini_v1/`, …) is a human-readable
-label that coexists with DVC's content hashes — one artifact set per trained
-model, all versioned against the same data contract. Bump to `_v2` when the
-cleaning/tokenization logic, the sentiment labeling thresholds, or the
-vectorizer configuration change. A fitted vectorizer must always be versioned
-**alongside the exact split it was fit on**, and a trained model is only
-valid with the vectorizer it was trained against.
+label that coexists with DVC's content hashes. Bump to `_v2` when the
+cleaning/tokenization logic, the sentiment labeling thresholds, or the vectorizer
+configuration change. A fitted vectorizer must always be versioned **alongside
+the exact split it was fit on** so training and serving use the same
+vocabulary/IDF.
+
 
 The current **v1 contract** is: Scheme A sentiment thresholds
 (`NEGATIVE < 6`, `6 ≤ NEUTRAL < 8`, `POSITIVE ≥ 8` on `Reviewer_Score`) and the
