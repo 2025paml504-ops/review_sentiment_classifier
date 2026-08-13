@@ -28,5 +28,11 @@ dist/
 .coverage
 htmlcov/
 
+# ML run outputs
+artifacts/
+mlruns/
+mlartifacts/
+mlflow.db
+
 # OS
 .DS_Store

@@ -57,3 +57,17 @@ Match the existing code when adding new work:
 - [ ] Do **not** commit files under `data/`, `feature_store/*.db`, or
       `model_store/*` — these are DVC-tracked and git-ignored.
 - [ ] `dvc push` if you have access to a shared remote.
+
+## Viewing MLflow experiments
+
+Training runs are tracked in a SQLite MLflow store at the repo root (`mlflow.db`).
+Launch the UI with the helper script:
+
+```bash
+./scripts/mlflow_ui.sh        # http://127.0.0.1:5001
+./scripts/mlflow_ui.sh 5055   # custom port
+```
+
+It uses port **5001** by default because macOS AirPlay Receiver occupies port
+5000 (and returns 403). Open the URL with `127.0.0.1`, not `localhost`.
+
