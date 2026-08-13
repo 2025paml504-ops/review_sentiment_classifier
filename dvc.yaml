@@ -70,7 +70,7 @@ stages:
       - training/metrics_linear_svc.json:
           cache: false
 
-  # Recurrent baseline (added 10 Aug - Ankita). It does *not* depend on the
+  # Recurrent baseline (v1.2). It does *not* depend on the
   # TF-IDF vectorizer: a recurrent net needs ordered token ids, so this trainer
   # builds its own word index from the same train split.
   train_rnn:

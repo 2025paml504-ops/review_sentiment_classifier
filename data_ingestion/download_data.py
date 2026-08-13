@@ -1,4 +1,4 @@
-"""Kaggle download entrypoint for the raw hotel-reviews CSV (added 11-Aug - Ankita).
+"""Kaggle download entrypoint for the raw hotel-reviews CSV (v1.2).
 
 Thin CLI wrapper around data_ingestion.download() -- kept as its own module so
 it matches the rest of the pipeline's "one module per stage, runnable from the

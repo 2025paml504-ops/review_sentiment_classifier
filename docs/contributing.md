@@ -81,6 +81,26 @@ Match the existing code when adding new work:
 5. A new model **family** needs its own module, its own DVC stage, and its
    own `training/metrics_<family>.json` metric (`cache: false`).
 
+### Change which model gets served, or edit the API/UI
+1. Whatever model you're switching to must already have a metrics file to
+   compare against the others on macro-F1 (§14) - see the recipe above.
+2. Edit `serving/app.py`: model loading at startup, and the inference code
+   in `predict()` if the new model's input/output shape differs from the
+   current one (a HuggingFace model and a plain PyTorch checkpoint, for
+   example, load and run differently).
+3. Update `serving/requirements.txt` and the `Dockerfile`'s `COPY` lines to
+   match whatever the new model actually needs at runtime - not the full
+   root `requirements.txt`.
+4. Test it before committing: start the API (`uvicorn serving.app:app
+   --reload --port 8000`) and hit `/health` and `/predict` with curl, or use
+   the FastAPI docs at `/docs`. Check the edge cases in
+   [serving/README.md](../serving/README.md) still return `422`, not a
+   crash.
+5. `ui/index.html` only talks to `/predict`'s existing request/response
+   shape - it doesn't need changes unless that shape itself changed.
+6. Record the change in [Decisions §22](design/decisions.md) - which model,
+   why, and what it cost (latency, dependencies) compared to the alternative.
+
 ## Before you commit
 
 - [ ] `dvc repro` (or at least `python -m validation.validate_data`) passes green.

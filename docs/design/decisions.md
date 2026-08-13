@@ -6,6 +6,34 @@ Lightweight ADR-style records of the key choices behind the pipeline. Each entry
 gives the **context**, the **decision**, the **rationale**, and the
 **alternatives** considered, so future changes can be made deliberately.
 
+## At a glance
+
+| # | Decision | Why |
+|---|---|---|
+| [1](#1-text-cleaning--tokenization) | Clean text with plain regex: lowercase, expand contractions, strip placeholder text, attach negation to the next word | No extra dependencies; keeps negation ("not good") from being lost |
+| [2](#2-combine-positive--negative-into-full_review) | Merge the positive and negative review fields into one document | One sentiment label per review needs one text field |
+| [3](#3-sentiment-labeling--scheme-a) | Label sentiment by score: `<6` NEGATIVE, `6–8` NEUTRAL, `≥8` POSITIVE | This cutoff gives the least-imbalanced class split of the options tried |
+| [4](#4-tf-idf-over-embeddings) | Use TF-IDF features, not embeddings, for the first model | Fast, cheap, and easy to explain - the right starting point |
+| [5](#5-fit-on-train-only--stratified-split) | Split the data before fitting TF-IDF, and fit on the train split only | Prevents test-data leakage into the features |
+| [6](#6-feature-store--sqlite) | Store features in SQLite, not MySQL | No server needed; zero setup |
+| [7](#7-interim-as-csv-tokens-as-json-string) | Keep the intermediate file as CSV, with tokens stored as JSON text | Avoids adding a Parquet dependency just for one list column |
+| [8](#8-schema-contract-as-json) | Define the expected columns/types in a JSON file, not in code | A schema change becomes a one-line edit |
+| [9](#9-versioning-with-dvc) | Version datasets and model files with DVC | They're too large for git; a commit hash still pins an exact version |
+| [10](#10-contraction-expansion--negation-attachment-v11) | Expand contractions, then attach negation words to the next word | Keeps "not good" from splitting into two unrelated, unhelpful tokens |
+| [11](#11-de-duplicate-before-cleaning-v11) | Remove duplicate reviews before cleaning | Saves time and stops duplicates from skewing the classes |
+| [12](#12-cleaning-defects-detected-in-code-v11) | Added a script that scans for known cleaning bugs and reports counts | Turns "is the fix still working?" into a number, not a guess |
+| [13](#13-baseline-model--linear-classifier-on-tf-idf-v12) | Default model is a class-weighted LogisticRegression | Catches more NEGATIVE reviews than the alternative, and gives real confidence scores |
+| [14](#14-headline-metric--macro-f1-not-accuracy-v12) | Report macro-F1, not accuracy, as the main score | Accuracy can look good while ignoring the smallest class; macro-F1 can't |
+| [15](#15-transformer-fine-tune-as-a-pipeline-stage-v12) | Fine-tune a small pretrained model (BERT-mini) as a second, stronger model | Can see word order, unlike TF-IDF; built after the simple baseline existed |
+| [16](#16-mlflow-for-experiment-tracking-v12) | Log every run's settings, scores, and library versions to MLflow | Makes any past run reproducible from its own record |
+| [17](#17-class-imbalance--cost-sensitive-loss-not-resampling-v12) | Weight the rare classes more heavily during training, for all three model families | Same effect as duplicating rare rows, without the extra time or data |
+| [18](#18-engineering-grade-run-records-v12) | Standardize what every run logs, so runs can be compared fairly | A comparison is only as good as its weakest, most incomplete entry |
+| [19](#19-three-training-stages-correctly-named-v12) | Gave every model its own pipeline stage and an accurate artifact name | A model behind a manual flag, or a wrongly named folder, is easy to miss or misread |
+| [20](#20-a-recurrent-model-as-a-third-baseline-v12) | Added an RNN/LSTM trained from scratch as a third model | Sits between the simple baseline and the transformer - learns word order, no pretraining |
+| [21](#21-tuning-experiments--kept-vs-reverted-v12--v13--v14) | Kept a running log of every parameter change tried, and whether it was kept | Stops the same dead end from being tried again by accident |
+| [22](#22-serving-rnn_lstm-the-highest-scoring-model-on-current-data-v14) | The API serves `rnn_lstm`, the model with the best macro-F1 on current data | A data-cleaning fix flipped the ranking from `bert_mini`; serving follows the metric this project has used throughout (Decision 14) |
+| [23](#23-a-plain-html-page-over-the-api-not-a-framework-app-v14) | A single plain HTML/CSS/JS page (`ui/index.html`), no framework, calls the API | The whole page is one form and one API call - too simple to need framework overhead |
+
 ---
 
 ## 1. Text cleaning & tokenization
@@ -180,265 +208,163 @@ were only placeholder text and cleaned down to nothing. Those get dropped in
 
 ## 13. Baseline model — linear classifier on TF-IDF (v1.2)
 
-**Context.** ~504k documents, 20,000 sparse TF-IDF features, three classes
-split roughly 10/25/65 (§3). Needed a first model that's cheap, honest to
-evaluate, and easy to reason about.
+**Context.** Needed a first, simple model to measure everything else against.
 
-**Decision.** `training/train_linear.py` trains a
-`LogisticRegression(solver="saga", class_weight="balanced", max_iter=1000,
-tol=1e-3)` by default and saves it to `model_store/logreg_v1.pkl`.
-`LinearSVC(class_weight="balanced")` is available too, via `--model linear_svc`.
+**Decision.** `training/train_linear.py` trains a class-weighted
+LogisticRegression by default (`model_store/logreg_v1.pkl`). A class-weighted
+LinearSVC is also available via `--model linear_svc`.
 
-**Rationale.** Linear models handle high-dimensional sparse text well and
-train in minutes on CPU, and the per-class coefficients are actually readable.
-On the full test split, LogisticRegression scored 0.618 macro-F1 / 0.693
-accuracy / 0.732 NEGATIVE recall; LinearSVC scored 0.620 / 0.718 / 0.635 -
-basically tied on macro-F1. LogisticRegression won out as the default because
-it catches more of the NEGATIVE class, which is what the product actually
-cares about, and it gives a real confidence score through `predict_proba`.
+**Rationale.** LogisticRegression scores higher on macro-F1 (0.625 vs 0.605)
+and catches far more NEGATIVE reviews (0.712 vs 0.469 recall), so it's the
+default. `linear_svc` here is the calibrated version added in v1.4 (§21) -
+calibration traded recall for higher accuracy (0.736 vs 0.690), the same
+macro-F1-vs-accuracy tradeoff this project keeps measuring (§14).
 
-**Alternatives.** `MultinomialNB` is a fine sanity check but too weak to ship.
-Tree ensembles don't suit 20k sparse features well. Transformer fine-tuning
-came later, once this baseline existed (§15).
+**Alternatives.** Naive Bayes was too weak to use. Tree models don't suit
+this much sparse text. The transformer came later, once this baseline
+existed (§15).
 
 ## 14. Headline metric — macro-F1, not accuracy (v1.2)
 
-**Context.** The classes are imbalanced, roughly 10/25/65, so a model that
-always guesses POSITIVE already gets ~65% accuracy without learning anything.
+**Context.** The classes are imbalanced (~10/25/65), so accuracy alone can
+look good while mostly ignoring the small classes.
 
-**Decision.** Report macro-F1 as the headline number, along with per-class
-precision/recall/F1 and the full confusion matrix. Accuracy and weighted-F1
-are still recorded, just not the target. This goes out as a DVC `metrics:`
-output, so it's git-tracked.
+**Decision.** Macro-F1 (an equal-weighted average across all three classes)
+is the main score. Accuracy and weighted-F1 are still recorded, just not the
+target.
 
-**Rationale.** Macro-F1 treats all three classes equally, so a gain on the
-small NEGATIVE class actually shows up in the number. Most of what's left
-over is NEUTRAL and POSITIVE bleeding into each other, which makes sense
-given the 8.0 cutoff from §3 is just an arbitrary line through a continuous
-score.
+**Rationale.** Macro-F1 can't be inflated by doing well only on the largest
+class - a gain on the small NEGATIVE class actually shows up in the number.
 
-**Alternatives.** Accuracy is misleading here given the imbalance.
-Weighted-F1 has the same majority-class bias baked in. ROC-AUC is tracked as
-a secondary metric (§18) but isn't the headline.
+**Alternatives.** Accuracy and weighted-F1 both hide poor performance on the
+small classes. ROC-AUC is tracked too (§18) but isn't the headline.
 
 ## 15. Transformer fine-tune as a pipeline stage (v1.2)
 
-**Context.** TF-IDF can't see word order or context - `not_good` only works
-because §10 builds it by hand. A pretrained encoder actually understands
-this, but it was deliberately put off until the classical baseline existed
-(§13).
+**Context.** TF-IDF can't see word order or context. A pretrained language
+model can - this was built after the simpler baseline existed (§13), not
+instead of it.
 
-**Decision.** `training/train_transformer.py` fine-tunes a pretrained encoder
-(`google/bert_uncased_L-4_H-256_A-4` by default, overridable) through
-HuggingFace's `Trainer`, on the same splits as everything else, writing out
-`model_store/bert_mini_v1/` and its own metrics file. It's its own stage in
-`dvc.yaml`, shaped the same way as `train`.
+**Decision.** `training/train_transformer.py` fine-tunes BERT-mini on the
+same data splits as everything else, saving to `model_store/bert_mini_v1/`.
 
-**Rationale.** Using the same splits and the same metric shape means the
-transformer's macro-F1 is directly comparable to the baseline's, no caveats
-needed. It stays in the DAG even though it costs hours and ~2GB of `torch` -
-`dvc repro train` stops before reaching it if you don't need it. It's saved
-as a directory, not a `.pkl`, because the weights, tokenizer, and config all
-have to travel together, and `safetensors` both loads faster and doesn't
-execute arbitrary code the way pickle can. BERT-mini over BERT-base because
-it's a fraction of the size and runtime for a modest hit in quality - the
-right first pass at this size of corpus. (The artifact used to be called
-`distilbert_v1`, left over from an earlier default model - renamed in §19 to
-match what's actually being trained.)
+**Rationale.** Using the same splits and scoring keeps its macro-F1 directly
+comparable to the baseline's. BERT-mini (not a larger model) trades a little
+quality for much less time and size - the right call for a dataset this size.
 
-**Known caveat.** The splits carry `clean_review`, which is lowercased,
-stripped, and has negators glued together. That's not really the kind of
-text an encoder pretrained on natural writing expects, so it probably
-understates what the transformer could actually do. Feeding it raw
-`full_review` instead was tried and reverted (§21).
+**Known limitation.** The text going in is cleaned and simplified
+(lowercased, negation words glued together), not the natural writing this
+model was originally trained on, so it likely understates what the model
+could do with less-processed text. Raw text was tried instead and didn't
+help (§21).
 
-**Alternatives.** Frozen sentence-transformer embeddings are cheaper but
-usually land well below a full fine-tune. A hosted third-party API was ruled
-out - not open source, per-call cost, and nothing reproducible to version.
+**Alternatives.** Frozen sentence embeddings are cheaper but usually score
+below a full fine-tune. A hosted third-party API was ruled out: not open
+source, costs per call, and can't be version-controlled.
 
 ## 16. MLflow for experiment tracking (v1.2)
 
-**Context.** Before this, a training run left behind just a pickle and a
-metrics file, and both got overwritten the next time you trained. Nothing
-recorded which hyperparameters produced a given score, which commit the code
-was at, or which version of the data was used.
+**Context.** Before this, a training run just produced a file, with nothing
+recording which settings produced which score.
 
-**Decision.** `training/tracking.py` wraps every trainer in an MLflow run.
-Each run logs its parameters (hyperparameters, `random_state`, which split
-files), its metrics (macro-F1, weighted-F1, accuracy, per-class scores), tags
-(`model_type`, `stage`, `git_commit`, `smoke_test`), and artifacts (the
-model, the vectorizer, the schema, the confusion matrix, a `pip freeze`
-snapshot, `dvc.lock`). Everything goes into a local SQLite store, `mlflow.db`,
-plus `mlruns/`, under one shared experiment called `review_sentiment`. It's a
-required dependency now, not optional - every training stage declares it.
+**Decision.** Every run is now logged to MLflow - its settings, its scores,
+files like the model and confusion matrix, and a `pip freeze` snapshot of
+the exact library versions installed at the time - stored locally in
+`mlflow.db`, no external server needed.
 
-**Rationale.** DVC tells you which bytes went in and came out; MLflow tells
-you which knobs were turned and what score came out. `dvc.lock` is the
-bridge between them - it gets logged as the run's dataset reference. SQLite
-means no server to run, and it works offline (the old `./mlruns` file store
-is actually deprecated as of mlflow 3.15 anyway). The store itself is
-git-ignored, same rule as `model_store/`; the scored metrics stay git-tracked
-separately through the DVC `metrics:` files. Putting every model family in
-one experiment means they can all be ranked against each other.
+**Rationale.** DVC (§9) tracks which data went in; MLflow tracks which
+settings, code, and library versions produced a given score. Together they
+make any run reproducible from its logged record alone (seeds are fixed, so
+re-running gives the same result). `requirements.txt` doesn't pin exact
+versions, so the `pip freeze` snapshot is what makes a library-version
+change visible after the fact, even though it can't prevent one.
 
-**Reproducing a run.** Grab its `git_commit` tag, check that commit out,
-`dvc checkout`, then re-run with the logged parameters. Seeds are fixed
-(`random_state=42` everywhere), so you get the same result back.
+**Hypothesis and conclusion tags (v1.4).** Each run now also logs what it
+expected to happen before training starts, and what actually happened once
+the metrics were in, so that reasoning lives with the run itself.
 
-**Alternatives.** W&B and Neptune are hosted and need an account - this
-project is meant to run fully offline and open source. `dvc exp` is good for
-parameter sweeps tied to the DAG but doesn't give a comparison UI or a
-per-run artifact store.
+**Alternatives.** Hosted tools like Weights & Biases need an account; this
+project is meant to run fully offline.
 
 ## 17. Class imbalance — cost-sensitive loss, not resampling (v1.2)
 
-**Context.** The imbalance is roughly 10% NEGATIVE, 25% NEUTRAL, 65%
-POSITIVE. Always guessing POSITIVE gets ~65% accuracy while being useless,
-and NEGATIVE - the class that actually matters for the business - is the one
-an unweighted model is most likely to ignore. The split is stratified (§5),
-which keeps that imbalance intact for honest evaluation but doesn't help
-training at all.
+**Context.** NEGATIVE reviews are only ~10% of the data, so a model left to
+its own devices tends to mostly ignore that class.
 
-**Decision.** Both linear models fix the imbalance in the loss, not the
-data - `LogisticRegression` and `LinearSVC` both use `class_weight="balanced"`
-(§13). The transformer doesn't do this yet: it's still running plain
-unweighted cross-entropy, and now logs `model.class_weight="none"` (§18) so
-that gap is visible instead of just assumed.
+**Decision.** All three model families weight the rare classes more heavily
+during training: the linear models via `class_weight="balanced"`, the RNN
+via a weighted `CrossEntropyLoss`, and the transformer via a custom
+`WeightedTrainer` that overrides `compute_loss` the same way (added v1.2 -
+HuggingFace's stock `Trainer` doesn't support this out of the box).
 
-**Rationale.** Weighting each class by `w_c = n / (k · n_c)` has roughly the
-same effect as perfectly oversampling the minority classes, without adding
-rows or training time. The effect shows up directly in the numbers: NEGATIVE
-recall sits at 0.732 with precision at 0.450, which is exactly the
-over-predicting pattern you'd expect from a weighted model - an unweighted
-one gets more like 0.3-0.4 recall on a class this small.
+**Rationale.** It works: NEGATIVE recall is 0.732, well above what an
+unweighted model would get on a class this small.
 
-**Alternatives.** Oversampling does roughly the same thing as weighting but
-slower. Undersampling would throw away ~230k real rows. SMOTE was ruled out
-completely - interpolating between two sparse 20,000-dimensional TF-IDF
-vectors just produces documents that aren't real language; it's built for
-dense, low-dimensional features.
+**Alternatives.** Duplicating rare rows (oversampling) has the same effect
+but is slower. Removing common rows would throw away real data. SMOTE
+doesn't suit this kind of high-dimensional sparse text data.
 
-**Known limitation.** Imbalance isn't actually the bottleneck here. NEUTRAL
-is 25% of the data and is still the worst-performing class (F1 0.479),
-because the 8.0 cutoff from §3 is arbitrary - a review scored 7.9 and one
-scored 8.1 read almost identically. That's label noise, not an imbalance
-problem, and no amount of reweighting fixes it.
+**Known limitation.** Imbalance isn't actually the main bottleneck. NEUTRAL
+is 25% of the data and still performs worst (F1 0.479), because the score
+cutoff that defines it (§3) is somewhat arbitrary - a 7.9 and an 8.1 read
+almost identically but land in different classes. That's label noise, which
+reweighting can't fix.
 
-## 18. Engineering-grade run records: comparable, self-describing runs (v1.2)
+## 18. Engineering-grade run records (v1.2)
 
-**Context.** §16 got runs into MLflow, but the record wasn't good enough yet
-to answer questions from the UI alone. The two trainers logged completely
-different shapes - the linear baseline logged hyperparameters, per-class
-scores, a confusion matrix, the vectorizer, and the schema; the transformer
-logged one parameter and two metrics. Comparing them side by side meant
-comparing a full row against basically a stub. There was also no
-threshold-free metric, the feature store itself was invisible to any given
-run, and a `git_commit` tag could lie if the working tree had uncommitted
-changes.
+**Context.** §16 got runs into MLflow, but the linear and transformer
+trainers logged very different amounts of detail, making them hard to
+compare fairly.
 
-**Decision.** `feature_store.snapshot()` now returns a sha256, row count, and
-label distribution for the store, and every run logs it, plus a short
-`feature_store_sha256` tag. The schema file, `feature_column.json`, moved
-into `tracking.start_run` so both trainers carry it automatically. Both
-trainers now log `roc_auc_macro` and `roc_auc_weighted` too - `LinearSVC`
-doesn't have `predict_proba`, so it uses its `decision_function` margin
-instead, which works fine since AUC just needs a ranking. The transformer
-now emits the same metric and parameter names as the linear baseline. A
-`git_dirty` tag records whether the tree was actually clean. And
-`training/compare_runs.py` prints a ranked leaderboard right in the
-terminal.
+**Decision.** Every run now logs the same things - a hash of the exact data
+used, the same metric names (including ROC-AUC), and whether the code had
+uncommitted changes - and `training/compare_runs.py` prints a ranked
+leaderboard in the terminal.
 
-**Rationale.** A comparison is only as useful as its weakest row. Having the
-same metric and parameter names across model families is what lets a TF-IDF
-model and a fine-tuned encoder sort into the same table. Putting the dataset
-evidence into `start_run` instead of each trainer means a future trainer
-can't forget to log it.
+**Rationale.** A comparison is only as useful as its weakest entry; logging
+the same things for every model is what makes them comparable at all.
 
-**Alternatives.** Logging the whole feature store as an artifact would mean
-0.5GB per run for no real benefit - the hash already proves what matters.
-Per-class ROC-AUC turned out too noisy on the 10% NEGATIVE class, and
-per-class recall already covers that ground.
+**Alternatives.** Logging the entire dataset with every run was ruled out -
+too much storage for no benefit, since a hash already proves it matches.
 
-## 19. Three training stages, and artifacts named after what they are (v1.2)
+## 19. Three training stages, correctly named (v1.2)
 
-**Context.** Auditing the run history turned up two problems. `linear_svc`
-had no DVC stage at all - `dvc.yaml` only had a `train` stage running the
-default `logreg`, and `linear_svc` only existed behind a manual `--model`
-flag, so it never showed up from a plain `dvc repro`. The metrics file for it
-on disk was just a leftover from a one-off run made before tracking even
-existed. Separately, the transformer's artifact was still named
-`distilbert_v1`, even though the stage had moved on to fine-tuning BERT-mini
-- the folder name was asserting weights it didn't actually contain. On top
-of that, the DVC remote URL committed in `.dvc/config` was one developer's
-home directory, which obviously doesn't exist on anyone else's machine.
+**Context.** `linear_svc` only ran behind a manual `--model` flag, so it
+never showed up from a plain `dvc repro`. Separately, the transformer's
+saved folder was still named `distilbert_v1`, left over from an earlier
+model it no longer trains.
 
 **Decision.** Added a real `train_linear_svc` stage to `dvc.yaml`. Renamed
-the transformer artifacts from `distilbert_v1` to `bert_mini_v1`. Moved the
-remote URL out of the git-tracked `.dvc/config` and into the git-ignored
-`.dvc/config.local`.
+the transformer's output folder to `bert_mini_v1`.
 
-**Rationale.** A comparison that can silently drop a model isn't really a
-comparison - a declared stage always shows up in `dvc dag`, but a flag people
-have to remember is easy to forget. A wrong artifact name is worse than no
-name at all - someone loading `distilbert_v1/` would have drawn the wrong
-conclusion entirely. And a machine-local path in a shared config file breaks
-the project for every other clone.
+**Rationale.** A model that only runs if someone remembers a flag isn't
+really part of the pipeline. A wrong artifact name is worse than no name -
+it actively misleads whoever opens it.
 
-**Alternatives.** A `foreach` stage over the model names would be tidier, but
-it obscures which metric file actually belongs to which model.
+## 20. A recurrent model as a third baseline (v1.2)
 
-## 20. A recurrent baseline as its own stage and its own module (v1.2)
+**Context.** The comparison had two extremes: a simple bag-of-words model
+(§13) and a full pretrained transformer (§15). A recurrent net (RNN/LSTM)
+sits in between - it can learn word order, but starts with no pretraining.
 
-**Context.** The comparison had two extremes and nothing in between -
-bag-of-ngrams linear models (§13) on one side, a pretrained transformer
-(§15) on the other. The natural middle ground is a recurrent net trained
-entirely from scratch: it can see word order, which TF-IDF can't, but it has
-no pretrained knowledge going in, which makes it useful for separating how
-much of the transformer's advantage comes from sequence modeling versus just
-pretraining. An early attempt tried bolting an RNN branch onto
-`train_linear.py`, but that was the wrong shape - it meant feeding TF-IDF
-rows into `pad_sequences` and an `Embedding` layer, which doesn't make sense.
+**Decision.** `training/train_rnn.py` trains an RNN/LSTM from scratch,
+building its own vocabulary, on the same data splits and same class
+weighting as the linear baseline.
 
-**Decision.** A separate module, `training/train_rnn.py`, with its own DVC
-stage `train_rnn`, writing out `model_store/rnn_lstm_v1.pt`, a vocab JSON,
-and its own metrics file. It reads the same splits as everything else but
-builds its own word index instead of using TF-IDF: top 20,000 words,
-sequences padded or truncated to 200 tokens. Architecture is chosen with
-`--arch` - `rnn_lstm` by default, plus `rnn_bilstm` and `rnn_simple` -
-Embedding into a 128-unit recurrent layer, Dropout, then a Linear(3) head.
-Trained with Adam, weighted cross-entropy, 3 epochs. Same
-`class_weight="balanced"` treatment and the same tracking setup as the linear
-baseline.
+**Rationale.** It needed its own module because its input (an ordered
+sequence of words) is a different shape than the linear model's bag-of-words
+features - reusing that vectorizer would mean densifying a huge sparse
+matrix for no reason.
 
-**Rationale.** A recurrent net needs an ordered sequence of token ids, and
-TF-IDF is an unordered bag of n-grams - reusing the vectorizer would mean
-densifying a 20,000-wide sparse matrix across ~400k rows, which is tens of
-gigabytes for no good reason. The vocabulary gets saved right alongside the
-weights because a `.pt` checkpoint on its own is useless without it, the same
-idea as a classifier pickle needing its vectorizer.
+**Alternatives.** Built in PyTorch, not TensorFlow/Keras: TensorFlow doesn't
+publish wheels for the Python version this project runs on, and PyTorch was
+already a dependency for the transformer stage.
 
-**Framework: PyTorch, not Keras.** The first version of this was actually
-written in Keras, but `pip install tensorflow` failed outright - the project
-runs on Python 3.14, and TensorFlow doesn't publish wheels for it. Ported to
-`torch` instead, which was already a dependency for the transformer stage, so
-this added zero new dependencies. The architecture, hyperparameters, and
-tracking are all unchanged - only the framework is different.
+## 21. Tuning experiments — kept vs. reverted (v1.2 / v1.3 / v1.4)
 
-**Alternatives.** A `foreach` stage over the architectures runs into the same
-problem as §19. Pretrained embeddings like GloVe or word2vec would blur the
-from-scratch-versus-pretrained comparison this stage exists to draw. Keeping
-Keras around in a second Python environment would mean two interpreters for
-one stage, and `dvc repro` wouldn't run end to end anymore.
-
-## 21. Tuning experiments — kept vs. reverted (v1.2 / v1.3 — see the Version column)
-
-**Context.** Every change listed below was actually made, measured against
-the current numbers, and judged on macro-F1 (§14) before deciding to keep it
-or roll it back. None of this is guesswork - each row is a real run sitting
-in MLflow, traceable through its `git_commit` tag (§16). The ones that didn't
-help are worth recording just as much as the ones that did, since a config
-that's already been tried and dropped is easy to accidentally try again
-without a record like this.
+**Context.** Every row below is a real, measured experiment judged by
+macro-F1 (§14), not a guess, so a dropped idea doesn't get tried again by
+accident.
 
 | Experiment | Change | Result | Decision | Version |
 |---|---|---|---|---|
@@ -448,15 +374,86 @@ without a record like this.
 | RNN epochs (re-verified on the post-bugfix, larger dataset) | 3 vs. 4 vs. 6 | 3 → 0.6488, 4 → 0.6334, 6 → 0.6438 — 3 still wins, and the dip-then-partial-recovery pattern reproduced identically (same loss values) across separate runs, confirming training is deterministic | Kept at 3 | v1.3 |
 | Sentiment thresholds | Scheme A (`<6`/`6–8`/`≥8`) → NPS-style (`<7`/`7–9`/`≥9`) | Macro-F1 improved on every model | Reverted — prioritizes accuracy over macro-F1 as the headline metric, a deliberate call, not a measurement failure | v1.2 |
 | Transformer input text | `clean_review` → raw `full_review` | Macro-F1 0.6461 → 0.6459 — a wash, likely masked by `MAX_LENGTH=64` truncating before the difference could show | Reverted to `clean_review` | v1.2 |
+| `linear_svc` calibration | Wrapped in `CalibratedClassifierCV` (sigmoid, cv=5) to get real `predict_proba` output | Accuracy improved 0.7206 → 0.7356; macro-F1 fell 0.6225 → 0.6049 | Kept the calibrated version in the codebase as a real, measured serving candidate — but not selected for serving (§22), since it trades away macro-F1 | v1.4 |
 
-**Rationale.** Without a table like this, all you have is tribal knowledge -
-"we tried that, it didn't work" with no record of what "that" actually was or
-what "didn't work" was measured against. Every row here can be reproduced
-from its `git_commit` tag (§16), even though the code has moved on from most
-of these configs by now.
+**How to read a "reverted" row.** It means the code went back to what it was
+before - not that the experiment was wasted. A negative result is still
+worth keeping on record, same idea as §12's cleaning diagnostics.
 
-**How to read a "reverted" row.** Reverted just means the code went back to
-what it was before - it doesn't mean the experiment was wasted. Each one is a
-real negative result worth keeping on record, the same idea as §12's cleaning
-diagnostics: writing down a dead end is what stops someone (including a
-future version of this same project) from spending time rediscovering it.
+## 22. Serving `rnn_lstm`, the highest-scoring model on current data (v1.4)
+
+**Context.** The API serves one model out of four, picked by macro-F1
+(§14). Which model that is changed partway through the project: a
+data-cleaning bug fix (§10-12) shifted the ranking, described below.
+
+**Decision.** `serving/app.py` (FastAPI) serves `rnn_lstm` - it validates
+input (rejects empty, whitespace-only, or junk-only text), loads the model
+once at startup, and returns a prediction with confidence scores and how
+long the request took.
+
+**Why `rnn_lstm` and not `bert_mini`.** On an earlier data snapshot, before
+the negation-scope and placeholder-leak bugs were fixed (§10-12), `bert_mini`
+genuinely was the best of the four (macro-F1 0.6685) and was the original
+serving pick. After that data got regenerated with the fixes, the ranking
+flipped: `rnn_lstm`'s kept 3-epoch configuration (chosen and re-verified in
+§21) now scores 0.6488 against `bert_mini`'s 0.6461 on the same, current
+data - a small but real, repeatable gap, not noise (§21 confirms the RNN
+result reproduces identically across separate runs). Since this project
+picks the served model by macro-F1 on the data it actually ships with, the
+serving choice was updated to match.
+
+**Docker packaging.** The root `Dockerfile` builds the API into a single
+container: a `python:3.12-slim` base, a scoped `serving/requirements.txt`
+instead of the full project one (no `dvc`, `mlflow`, or `scikit-learn` -
+`rnn_lstm` doesn't need them to serve), and only the files the API actually
+uses copied in (`serving/`, `features/build_features.py` for `clean_text()`,
+and the trained RNN's weights and vocabulary file). `rnn_lstm` doesn't need
+`transformers` either, unlike `bert_mini` would have - just `torch` and a
+small JSON vocabulary. Anyone with Docker can run the API the same way,
+without setting up a matching Python environment by hand.
+
+**Rationale.** `linear_svc` actually scores higher on plain accuracy
+(73.56% vs `rnn_lstm`'s 70.60%), but accuracy rewards guessing the majority
+class, which is exactly why this project uses macro-F1 instead (§14) -
+serving a different model just because it wins on a different metric would
+contradict that choice. The cost: `rnn_lstm` is slower to respond than a
+linear model (~14.5ms vs `logreg`'s ~3ms per request), but noticeably
+cheaper than serving `bert_mini` would have been (~22ms, plus the
+`transformers` dependency).
+
+**Calibration experiment on `linear_svc`.** Before this, `linear_svc` was
+tested as a middle ground. Giving it real confidence scores (via
+`CalibratedClassifierCV`) raised its accuracy further but lowered its
+macro-F1 (§21) - the same tradeoff again, which ruled it out.
+
+**Alternatives.** `logreg` was the original pick (fastest) but scores lowest
+of the four on macro-F1. `bert_mini` was the pick until the data fix above
+changed the ranking - it's still the second-best on macro-F1, and would be
+worth revisiting if the ranking ever flips back on a future data update. A
+version of the API that lets callers pick any of the four models was
+considered and rejected as unnecessary complexity for a first version.
+
+## 23. A plain HTML page over the API, not a framework app (v1.4)
+
+**Context.** The API (§22) only speaks JSON over HTTP - useful for another
+program, but not something a person can just click around in. A simple way
+to type a review and see the predicted sentiment was worth having on top of
+it.
+
+**Decision.** `ui/index.html` is one self-contained file: a text box, an
+"Analyze" button, and a result showing the sentiment, the confidence
+percentage, and a bar for each class's probability. Plain HTML, CSS, and
+JavaScript - no framework (like React) and no build step.
+
+**Rationale.** The whole page is one form talking to one API endpoint, which
+doesn't need a framework's complexity to build. Anyone can open the file (or
+serve the folder) and it just works, with nothing to install or compile
+first.
+
+**A consequence: CORS.** The UI page and the API run on two different local
+addresses (different ports). Browsers block a page from calling a different
+address like that by default, as a security measure - otherwise a malicious
+page could quietly call APIs it has no business touching. Since the UI
+calling the API here is intentional, `serving/app.py` explicitly allows it
+(`CORSMiddleware`) - without that, the page would load fine, but every
+"Analyze" click would fail silently in the browser.

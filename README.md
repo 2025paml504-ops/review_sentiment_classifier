@@ -21,9 +21,22 @@ python3 -m venv .venv
 ```
 
 `dvc repro` runs the pipeline stages in dependency order and skips anything
-already up-to-date. The pipeline now also trains four models; the last stage
-(`train_transformer`) is the heaviest (~1 hour) — run `dvc repro train`
-instead to stop at the fast linear baseline.
+already up-to-date. The pipeline trains four models; the heaviest is the
+last stage, `train_transformer` (`bert_mini`, hours on CPU). Run
+`dvc repro train_rnn` instead to stop after `rnn_lstm` - that's the model
+`serving/` actually uses, and it's a fast stage.
+
+Then, to run the API and the UI (needs `rnn_lstm` from the step above):
+
+```bash
+# one terminal
+.venv/bin/uvicorn serving.app:app --reload --port 8000
+
+# a second terminal
+.venv/bin/python -m http.server 8090 --directory ui
+```
+
+Open `http://localhost:8090/index.html`. Details: [serving/README.md](serving/README.md).
 
 ## Repository layout
 
@@ -38,7 +51,8 @@ instead to stop at the fast linear baseline.
 | `model_store/`   | Persisted model artifacts, one set per trained model              |
 | `training/`      | Four trainers, MLflow tracking (`tracking.py`), leaderboard (`compare_runs.py`) |
 | `mlflow.db`, `mlruns/` | Local MLflow tracking store (git-ignored, regenerable)  |
-| `serving/`, `ui/`| Reserved for serving and UI                                      |
+| `serving/`       | FastAPI REST API (`/health`, `/predict`) serving `rnn_lstm`; `Dockerfile` at repo root packages it |
+| `ui/`            | Static page (`index.html`) that calls the serving API and shows the result |
 
 ## Documentation
 
@@ -58,10 +72,10 @@ this is the deep dive, not required just to run the pipeline).
 
 ## Status / roadmap
 
-The data → features → feature store → TF-IDF → training pipeline covers four
-models — `logreg` (default), `linear_svc`, a recurrent net (`rnn_lstm`), and a
-BERT-mini fine-tune — trained on the same splits and compared on macro-F1.
-Every run is tracked in MLflow, so results are comparable and reproducible.
-See [Decisions §13–20](docs/design/decisions.md) for what was built, and
-[Decisions §21](docs/design/decisions.md) for the tuning experiments tried and
-(where they didn't help) reverted. `serving/` and `ui/` remain reserved.
+Data -> features -> feature store -> TF-IDF -> four trained models
+(`logreg`, `linear_svc`, `rnn_lstm`, `bert_mini`) -> compared on macro-F1
+-> tracked in MLflow. [Decisions §13–20](docs/design/decisions.md) (models)
+-> [§21](docs/design/decisions.md) (tuning experiments, kept vs. reverted).
+
+`serving/` and `ui/` are now both built — see [serving/README.md](serving/README.md)
+and [Decisions §22–23](docs/design/decisions.md).

@@ -5,6 +5,7 @@ from pathlib import Path
 
 import joblib
 import pandas as pd
+from sklearn.calibration import CalibratedClassifierCV
 from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import (
     accuracy_score,
@@ -38,8 +39,23 @@ MODELS = {
         ),
         "logreg_v1.pkl",
     ),
+    # Wrapped in CalibratedClassifierCV (v1.4): LinearSVC has no predict_proba
+    # on its own, only decision_function. This was added to give it real
+    # per-class probabilities as a serving candidate - it fits 5 LinearSVC
+    # clones under cross-validation and calibrates each one's scores into
+    # actual probabilities, done on the training data only, never touching
+    # the test split, so it doesn't leak into the reported metrics.
+    # linear_svc wasn't the model that ended up served (decisions.md #22 -
+    # rnn_lstm was), but the calibration result is real and worth keeping:
+    # it raised accuracy but lowered macro-F1 (decisions.md #21), the same
+    # tradeoff this project keeps measuring. Kept as the default `linear_svc`
+    # config rather than reverted, since it's the more complete comparison.
     "linear_svc": (
-        lambda: LinearSVC(class_weight="balanced", random_state=RANDOM_STATE),
+        lambda: CalibratedClassifierCV(
+            LinearSVC(class_weight="balanced", random_state=RANDOM_STATE),
+            method="sigmoid",
+            cv=5,
+        ),
         "linear_svc_v1.pkl",
     ),
 }
@@ -49,6 +65,23 @@ MODELS = {
 # module is built around. See training/train_rnn.py (v1.2).
 
 DEFAULT_MODEL = "logreg"
+
+# Added (v1.4): the prediction each config is actually testing, logged as an
+# MLflow tag before training and checked against the real metrics afterward
+# (see training/tracking.py's start_run/set_conclusion).
+HYPOTHESES = {
+    "logreg": (
+        "class_weight='balanced' will lift NEGATIVE recall well above what an "
+        "unweighted model gets on a class this small (~10% of the data), at "
+        "some cost to precision (decisions.md #17)."
+    ),
+    "linear_svc": (
+        "Calibrating LinearSVC's decision_function into probabilities "
+        "(CalibratedClassifierCV, sigmoid, cv=5) will raise accuracy but lower "
+        "macro-F1 - the same accuracy-vs-macro-F1 tradeoff this project keeps "
+        "measuring elsewhere (decisions.md #14, #22)."
+    ),
+}
 
 
 def metrics_path(model_name: str) -> Path:
@@ -189,7 +222,7 @@ def train(
     tags = {"stage": "train", "framework": "scikit-learn", "smoke_test": str(limit is not None)}
 
     params = run_params(model, model_name, limit, confidence_threshold)
-    with tracking.start_run(model_name, params, tags) as run:
+    with tracking.start_run(model_name, params, tags, hypothesis=HYPOTHESES.get(model_name)) as run:
         model.fit(X_train, y_train)
         metrics = evaluate(model, X_test, y_test, confidence_threshold)
         metrics["model"] = model_name
@@ -205,6 +238,10 @@ def train(
         run.log_dict(metrics["confusion_matrix"], "confusion_matrix.json")
         run.log_sklearn_model(model)
         run.log_artifact(VECTORIZER_PATH, "vectorizer")
+        run.set_conclusion(
+            f"macro-F1 {metrics['macro_f1']:.4f}, accuracy {metrics['accuracy']:.4f}, "
+            f"NEGATIVE recall {metrics['per_class']['NEGATIVE']['recall']:.4f}."
+        )
 
         # Smoke runs (--limit) must not overwrite the scored metrics file DVC
         # tracks; the run itself is still recorded, tagged smoke_test=True.

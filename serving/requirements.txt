@@ -1,0 +1,11 @@
+# Serving-only dependencies (M4, added 12-Aug, switched to rnn_lstm v1.4).
+# Everything the API needs at runtime: pandas via features.build_features
+# (for clean_text()), fastapi/uvicorn for the API itself, and torch to load
+# and run the trained RNN. No `transformers` needed - rnn_lstm is a plain
+# PyTorch model with its own small vocabulary file, not a HuggingFace model.
+# See Decisions §22 for why rnn_lstm is the served model.
+pandas
+numpy
+fastapi
+uvicorn
+torch

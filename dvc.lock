@@ -9,8 +9,8 @@ stages:
       size: 238154765
     - path: features/build_features.py
       hash: md5
-      md5: 26485060ba742bf68a4dfd96877fe57a
-      size: 13738
+      md5: 81f6cef1eb4a0ca1bed3e0e934491ebb
+      size: 13352
     outs:
     - path: data/interim/features_clean.csv
       hash: md5
@@ -40,8 +40,8 @@ stages:
       size: 476391972
     - path: feature_store/feature_store.py
       hash: md5
-      md5: 7884eaabecde32cc1f29ec41c8aaaafe
-      size: 3676
+      md5: 36964c7ae75cc6fe90018ced75a2e31c
+      size: 3666
     outs:
     - path: feature_store/feature_store.db
       hash: md5
@@ -56,8 +56,8 @@ stages:
       size: 535896064
     - path: features/vectorize.py
       hash: md5
-      md5: e27f8ed40514b326292a4bddf83e25c1
-      size: 3467
+      md5: bc46d9309233ce9e2df05ae301a670ad
+      size: 3407
     outs:
     - path: data/processed/test_v1.csv
       hash: md5
@@ -69,7 +69,7 @@ stages:
       size: 155544814
     - path: model_store/tfidf_vectorizer_v1.pkl
       hash: md5
-      md5: 7e3a4f8233550ae4bb2eebd2b220c26d
+      md5: 35bf3f3174dc5ecc6d9832b4ab14bed8
       size: 789728
   train:
     cmd: python -m training.train_linear
@@ -84,20 +84,20 @@ stages:
       size: 155544814
     - path: feature_store/feature_store.py
       hash: md5
-      md5: 7884eaabecde32cc1f29ec41c8aaaafe
-      size: 3676
+      md5: 36964c7ae75cc6fe90018ced75a2e31c
+      size: 3666
     - path: model_store/tfidf_vectorizer_v1.pkl
       hash: md5
-      md5: 7e3a4f8233550ae4bb2eebd2b220c26d
+      md5: 35bf3f3174dc5ecc6d9832b4ab14bed8
       size: 789728
     - path: training/tracking.py
       hash: md5
-      md5: ef14a9944444c55682e17cda911dc88a
-      size: 11184
+      md5: 9a5e25e0742548b9d5322ca85862e25b
+      size: 12567
     - path: training/train_linear.py
       hash: md5
-      md5: a4ee0b2f6d1ee8622f0bc4076ab84444
-      size: 9332
+      md5: 5616e501c22af19c94ec682277c4e907
+      size: 11548
     - path: validation/feature_column.json
       hash: md5
       md5: f7ce50cf469f35f2948005a01ee985bc
@@ -124,20 +124,20 @@ stages:
       size: 155544814
     - path: feature_store/feature_store.py
       hash: md5
-      md5: 7884eaabecde32cc1f29ec41c8aaaafe
-      size: 3676
+      md5: 36964c7ae75cc6fe90018ced75a2e31c
+      size: 3666
     - path: model_store/tfidf_vectorizer_v1.pkl
       hash: md5
-      md5: 7e3a4f8233550ae4bb2eebd2b220c26d
+      md5: 35bf3f3174dc5ecc6d9832b4ab14bed8
       size: 789728
     - path: training/tracking.py
       hash: md5
-      md5: ef14a9944444c55682e17cda911dc88a
-      size: 11184
+      md5: 9a5e25e0742548b9d5322ca85862e25b
+      size: 12567
     - path: training/train_linear.py
       hash: md5
-      md5: a4ee0b2f6d1ee8622f0bc4076ab84444
-      size: 9332
+      md5: 5616e501c22af19c94ec682277c4e907
+      size: 11548
     - path: validation/feature_column.json
       hash: md5
       md5: f7ce50cf469f35f2948005a01ee985bc
@@ -145,12 +145,12 @@ stages:
     outs:
     - path: model_store/linear_svc_v1.pkl
       hash: md5
-      md5: 982b4bb18db136bc32f4498bfb0c408f
-      size: 480923
+      md5: de3527392d0a638dd032347d583477c7
+      size: 2405346
     - path: training/metrics_linear_svc.json
       hash: md5
-      md5: 36322f474de531f689ed8b8e1c6aa8f3
-      size: 1047
+      md5: cb09b9e891bf94ec74e0ed972313887a
+      size: 1128
   train_rnn:
     cmd: python -m training.train_rnn
     deps:
@@ -164,16 +164,16 @@ stages:
       size: 155544814
     - path: feature_store/feature_store.py
       hash: md5
-      md5: 7884eaabecde32cc1f29ec41c8aaaafe
-      size: 3676
+      md5: 36964c7ae75cc6fe90018ced75a2e31c
+      size: 3666
     - path: training/tracking.py
       hash: md5
-      md5: ef14a9944444c55682e17cda911dc88a
-      size: 11184
+      md5: 9a5e25e0742548b9d5322ca85862e25b
+      size: 12567
     - path: training/train_rnn.py
       hash: md5
-      md5: e5986f9b76e1d84c915b330256d6de6b
-      size: 18780
+      md5: bdede148ca6f5f4deb5bd4d1d1e93317
+      size: 19749
     - path: validation/feature_column.json
       hash: md5
       md5: f7ce50cf469f35f2948005a01ee985bc
@@ -204,16 +204,16 @@ stages:
       size: 155544814
     - path: feature_store/feature_store.py
       hash: md5
-      md5: ff3310b6329e378b38102c9f2fd9f6da
-      size: 3570
+      md5: 36964c7ae75cc6fe90018ced75a2e31c
+      size: 3666
     - path: training/tracking.py
       hash: md5
-      md5: fb4bc59364393469f615c9a98c9265d7
-      size: 11129
+      md5: 9a5e25e0742548b9d5322ca85862e25b
+      size: 12567
     - path: training/train_transformer.py
       hash: md5
-      md5: 9f2a753afcac0dbeec630cfe906e6bf0
-      size: 16979
+      md5: f8949aa7978aaff49e9f3c131d926da6
+      size: 18277
     - path: validation/feature_column.json
       hash: md5
       md5: f7ce50cf469f35f2948005a01ee985bc

@@ -77,6 +77,13 @@ VALIDATION_SPLIT = 0.1
 ARCHITECTURES = ("rnn_lstm", "rnn_bilstm", "rnn_simple")
 DEFAULT_ARCH = "rnn_lstm"
 
+# Added (v1.4): logged as a hypothesis tag before training (training/tracking.py).
+HYPOTHESIS_TEMPLATE = (
+    "Training for {epochs} epochs will keep macro-F1 at or above the proven "
+    "3-epoch baseline - a 4th epoch previously overfit the metric that "
+    "mattered even while validation loss kept falling (decisions.md #21)."
+)
+
 LABEL2ID = {label: i for i, label in enumerate(SENTIMENT_LABELS)}
 ID2LABEL = {i: label for label, i in LABEL2ID.items()}
 
@@ -359,7 +366,8 @@ def train(
     criterion = nn.CrossEntropyLoss(weight=weight_tensor)
     optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate)
 
-    with tracking.start_run(arch, params, tags) as run:
+    hypothesis = HYPOTHESIS_TEMPLATE.format(epochs=epochs)
+    with tracking.start_run(arch, params, tags, hypothesis=hypothesis) as run:
         for epoch in range(epochs):
             model.train()
             total, seen = 0.0, 0
@@ -412,6 +420,10 @@ def train(
         run.log_dict(metrics["confusion_matrix"], "confusion_matrix.json")
         run.log_artifact(model_path(arch), "model")
         run.log_artifact(vocab_path(arch), "model")
+        run.set_conclusion(
+            f"macro-F1 {metrics['macro_f1']:.4f}, accuracy {metrics['accuracy']:.4f} "
+            f"after {epochs} epoch(s)."
+        )
 
         # Smoke runs (--limit) must not overwrite the scored metrics file that
         # DVC tracks; the run itself is still recorded, tagged smoke_test=True.

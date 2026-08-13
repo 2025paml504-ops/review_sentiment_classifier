@@ -9,7 +9,9 @@ instructions see the [top-level docs](../pipeline.md).
 ## Contents
 
 - **[Architecture guide](architecture.md)** — components, data flow (the DVC DAG),
-  tech stack, design principles, and where future work plugs in.
+  the serving API and UI, tech stack, design principles, and where future work
+  plugs in.
 - **[Decision-making guide](decisions.md)** — the key choices (text cleaning,
-  sentiment labeling, TF-IDF, SQLite feature store, DVC, …) with the context,
-  rationale, and alternatives considered for each.
+  sentiment labeling, TF-IDF, SQLite feature store, DVC, which model gets
+  served, the serving API, the UI, …) with the context, rationale, and
+  alternatives considered for each.

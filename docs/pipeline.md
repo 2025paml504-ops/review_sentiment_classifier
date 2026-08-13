@@ -78,8 +78,14 @@ all four training stages ──▶ training/tracking.py ──▶ mlflow.db + ml
    Fine-tunes a pretrained BERT-mini encoder on the same splits, so its
    macro-F1 is directly comparable to the other three.
 
-
-
+None of this trains a server - the four steps above only produce files under
+`model_store/`. Once step 6 (`train_rnn`) has run, `model_store/rnn_lstm_v1.pt`
+exists and `serving/` can turn it into a running API. That's a separate
+concern on purpose: DVC reproduces a pipeline that runs once and finishes,
+and a server does the opposite - it starts and keeps running. See
+[serving/README.md](../serving/README.md) for how to run the API and the UI
+on top of it, and [Decisions §22-23](design/decisions.md) for why `rnn_lstm`
+is the model actually served.
 
 ## Schema contract
 
@@ -122,4 +128,4 @@ is logged, not just the final model file. The one known gap: exact library
 versions aren't locked in `requirements.txt`, so results could shift if
 installed fresh months later — a snapshot of the installed versions is logged
 per run so that drift is at least visible after the fact, even though it
-isn't prevented. Details: [Decisions §21](design/decisions.md).
+isn't prevented. Details: [Decisions §16](design/decisions.md).

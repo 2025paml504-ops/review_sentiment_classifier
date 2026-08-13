@@ -12,6 +12,7 @@ runs (`--limit`) are excluded by default, since they aren't scored versions.
 
     python -m training.compare_runs                  # scored runs, best first
     python -m training.compare_runs --all            # include smoke runs
+    python -m training.compare_runs --full           # every run, not just each model's best
     python -m training.compare_runs --sort accuracy
     python -m training.compare_runs --json           # machine-readable
     python -m training.compare_runs --md             # also write docs/model_leaderboard.md

@@ -30,7 +30,7 @@
     `dvc repro`, or standalone from the repo root:
 
         python -m training.train_transformer --limit 5000 --epochs 1   # smoke test
-        python -m training.train_transformer                           # full fine-tune
+        python -m training.train_transformer                          # full fine-tune
 
     Note: a full fine-tune over ~400k reviews is a GPU-scale job (hours). Start with
     `--limit`, and use `--subsample` for a stratified fraction of the training set.
@@ -86,6 +86,17 @@ WARMUP_STEPS = 0
 
 LABEL2ID = {label: i for i, label in enumerate(SENTIMENT_LABELS)}
 ID2LABEL = {i: label for label, i in LABEL2ID.items()}
+
+# Added (v1.4): logged as a hypothesis tag before training (training/tracking.py).
+# The config is fixed run to run, so this is as much a reproducibility check
+# as a fresh experiment - see decisions.md #21's re-verified epoch row for the
+# same idea applied to train_rnn.py.
+HYPOTHESIS_TEMPLATE = (
+    "Fine-tuning {base_model} for {epochs} epoch(s) on clean_review with "
+    "class-weighted cross-entropy will land close to the previously measured "
+    "macro-F1 (~0.646) - the config (base model, MAX_LENGTH={max_length}, "
+    "learning rate) is unchanged run to run (decisions.md #15, #17)."
+)
 
 # TEXT_COLUMN = "full_review"
 # Raw text tested in isolation v1.2 against the clean_review
@@ -248,10 +259,10 @@ def build_dataset(df: pd.DataFrame, tokenizer):
 # them), but a class statement needs its base class to already exist. So
 # this factory defers building the class until train() has done that import.
 def _build_weighted_trainer_class(Trainer, nn):
-    """The stock Trainer uses unweighted cross-entropy: a documented gap
-    (decisions.md #17 - "planned but never landed"). Overriding compute_loss
-    is the standard way to give it a class-weighted loss, matching the
-    balanced treatment the linear/RNN trainers already apply."""
+    """HuggingFace's stock Trainer has no built-in class weighting - only
+    plain unweighted cross-entropy. Overriding compute_loss is the standard
+    way to give it a class-weighted loss, matching the balanced treatment
+    the linear/RNN trainers already apply (decisions.md #17)."""
 
     class WeightedTrainer(Trainer):
         def __init__(self, *args, class_weights=None, **kwargs):
@@ -356,7 +367,8 @@ def train(
     }
     params = run_params(base_model, epochs, batch_size, learning_rate, limit, confidence_threshold)
 
-    with tracking.start_run("bert_mini", params, tags) as run:
+    hypothesis = HYPOTHESIS_TEMPLATE.format(base_model=base_model, epochs=epochs, max_length=MAX_LENGTH)
+    with tracking.start_run("bert_mini", params, tags, hypothesis=hypothesis) as run:
         trainer.train()
 
         predictions = trainer.predict(test_ds)
@@ -388,6 +400,10 @@ def train(
         run.log_metrics(metrics)
         run.log_dict(metrics["confusion_matrix"], "confusion_matrix.json")
         run.log_artifact(output_dir, "model")
+        run.set_conclusion(
+            f"macro-F1 {metrics['macro_f1']:.4f}, accuracy {metrics['accuracy']:.4f} "
+            f"after {epochs} epoch(s)."
+        )
 
         metrics["mlflow_run_id"] = run.run_id
         logger.info("MLflow run id: %s (experiment %s)", run.run_id, tracking.EXPERIMENT_NAME)

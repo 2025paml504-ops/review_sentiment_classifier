@@ -27,3 +27,7 @@ tiktoken
 # dependency. It is deliberately *not* Keras: TensorFlow publishes no wheels
 # for the Python 3.14 this project runs on. Added (v1.2).
 
+# Serving (serving/app.py): the REST API, added (v1.4). The ui/ page needs
+# nothing extra - it's plain HTML/CSS/JS with no build step.
+fastapi
+uvicorn

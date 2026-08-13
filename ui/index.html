@@ -1,0 +1,239 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Hotel Review Sentiment</title>
+<style>
+  :root {
+    --bg: #f7f5f2;
+    --panel: #ffffff;
+    --text: #2b2620;
+    --muted: #6b6258;
+    --accent: #5b3a29;
+    --border: #e4ddd3;
+    --negative: #b0413e;
+    --neutral: #a3822f;
+    --positive: #3f7a4d;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    padding: 2.5rem 1.5rem;
+    background: var(--bg);
+    color: var(--text);
+    font-family: -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif;
+    display: flex;
+    justify-content: center;
+  }
+  main {
+    width: 100%;
+    max-width: 640px;
+  }
+  h1 {
+    font-size: 1.4rem;
+    margin: 0 0 0.25rem;
+  }
+  p.sub {
+    color: var(--muted);
+    margin: 0 0 1.5rem;
+    font-size: 0.9rem;
+  }
+  textarea {
+    width: 100%;
+    min-height: 120px;
+    padding: 0.75rem;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    font-size: 0.95rem;
+    font-family: inherit;
+    resize: vertical;
+    background: var(--panel);
+    color: var(--text);
+  }
+  textarea:focus { outline: 2px solid var(--accent); outline-offset: 1px; }
+  .row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-top: 0.6rem;
+  }
+  .char-count { font-size: 0.8rem; color: var(--muted); }
+  button {
+    background: var(--accent);
+    color: white;
+    border: none;
+    padding: 0.6rem 1.4rem;
+    border-radius: 8px;
+    font-size: 0.95rem;
+    cursor: pointer;
+  }
+  button:disabled { opacity: 0.5; cursor: not-allowed; }
+  button:not(:disabled):hover { opacity: 0.9; }
+  #result {
+    margin-top: 1.5rem;
+    padding: 1.25rem;
+    border-radius: 10px;
+    background: var(--panel);
+    border: 1px solid var(--border);
+    display: none;
+  }
+  #result.show { display: block; }
+  .badge {
+    display: inline-block;
+    padding: 0.25rem 0.75rem;
+    border-radius: 999px;
+    color: white;
+    font-weight: 600;
+    font-size: 0.85rem;
+    letter-spacing: 0.02em;
+  }
+  .badge.NEGATIVE { background: var(--negative); }
+  .badge.NEUTRAL  { background: var(--neutral); }
+  .badge.POSITIVE { background: var(--positive); }
+  .confidence { color: var(--muted); font-size: 0.85rem; margin-left: 0.5rem; }
+  .bars { margin-top: 1rem; }
+  .bar-row {
+    display: grid;
+    grid-template-columns: 90px 1fr 50px;
+    align-items: center;
+    gap: 0.5rem;
+    margin-bottom: 0.4rem;
+    font-size: 0.85rem;
+  }
+  .bar-track {
+    background: var(--border);
+    border-radius: 6px;
+    height: 10px;
+    overflow: hidden;
+  }
+  .bar-fill { height: 100%; border-radius: 6px; }
+  .bar-fill.NEGATIVE { background: var(--negative); }
+  .bar-fill.NEUTRAL  { background: var(--neutral); }
+  .bar-fill.POSITIVE { background: var(--positive); }
+  .meta { margin-top: 0.9rem; font-size: 0.78rem; color: var(--muted); }
+  #error {
+    margin-top: 1.5rem;
+    padding: 0.9rem 1.1rem;
+    border-radius: 8px;
+    background: #fbeceb;
+    border: 1px solid #e3b8b6;
+    color: var(--negative);
+    font-size: 0.88rem;
+    display: none;
+  }
+  #error.show { display: block; }
+  code { background: #efe9e1; padding: 0.1rem 0.35rem; border-radius: 4px; font-size: 0.85em; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Hotel Review Sentiment</h1>
+  <p class="sub">Type or paste a review. Calls the local <code>rnn_lstm</code> API at
+    <code id="api-url"></code>.</p>
+
+  <textarea id="text" placeholder="e.g. The room was clean and the staff were incredibly friendly" maxlength="5000"></textarea>
+  <div class="row">
+    <span class="char-count"><span id="count">0</span> / 5000</span>
+    <button id="submit">Analyze</button>
+  </div>
+
+  <div id="result">
+    <span id="badge" class="badge"></span>
+    <span id="confidence" class="confidence"></span>
+    <div class="bars" id="bars"></div>
+    <div class="meta" id="meta"></div>
+  </div>
+
+  <div id="error"></div>
+</main>
+
+<script>
+  // Change this if the API isn't running on the default local port.
+  const API_BASE = "http://127.0.0.1:8000";
+  document.getElementById("api-url").textContent = API_BASE + "/predict";
+
+  const textEl = document.getElementById("text");
+  const countEl = document.getElementById("count");
+  const submitEl = document.getElementById("submit");
+  const resultEl = document.getElementById("result");
+  const errorEl = document.getElementById("error");
+  const badgeEl = document.getElementById("badge");
+  const confidenceEl = document.getElementById("confidence");
+  const barsEl = document.getElementById("bars");
+  const metaEl = document.getElementById("meta");
+
+  textEl.addEventListener("input", () => {
+    countEl.textContent = textEl.value.length;
+  });
+
+  async function analyze() {
+    const text = textEl.value;
+    resultEl.classList.remove("show");
+    errorEl.classList.remove("show");
+
+    if (!text.trim()) {
+      showError("Type something first.");
+      return;
+    }
+
+    submitEl.disabled = true;
+    submitEl.textContent = "Analyzing…";
+
+    try {
+      const res = await fetch(API_BASE + "/predict", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text }),
+      });
+      const data = await res.json();
+
+      if (!res.ok) {
+        const detail = Array.isArray(data.detail)
+          ? data.detail.map(d => d.msg).join("; ")
+          : data.detail;
+        showError(detail || `Request failed (HTTP ${res.status}).`);
+        return;
+      }
+
+      showResult(data);
+    } catch (err) {
+      showError("Couldn't reach the API. Is it running? (" + err.message + ")");
+    } finally {
+      submitEl.disabled = false;
+      submitEl.textContent = "Analyze";
+    }
+  }
+
+  function showResult(data) {
+    badgeEl.textContent = data.sentiment;
+    badgeEl.className = "badge " + data.sentiment;
+    confidenceEl.textContent = (data.confidence * 100).toFixed(1) + "% confident";
+
+    barsEl.innerHTML = "";
+    for (const [label, prob] of Object.entries(data.probabilities)) {
+      const row = document.createElement("div");
+      row.className = "bar-row";
+      row.innerHTML = `
+        <span>${label}</span>
+        <div class="bar-track"><div class="bar-fill ${label}" style="width:${(prob * 100).toFixed(1)}%"></div></div>
+        <span>${(prob * 100).toFixed(1)}%</span>
+      `;
+      barsEl.appendChild(row);
+    }
+
+    metaEl.textContent = `Answered in ${data.latency_ms} ms`;
+    resultEl.classList.add("show");
+  }
+
+  function showError(message) {
+    errorEl.textContent = message;
+    errorEl.classList.add("show");
+  }
+
+  submitEl.addEventListener("click", analyze);
+  textEl.addEventListener("keydown", (e) => {
+    if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) analyze();
+  });
+</script>
+</body>
+</html>

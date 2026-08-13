@@ -36,10 +36,11 @@ in v1.2.
 
 Usage:
 
-    with start_run("logreg", params={...}, tags={...}) as run:
+    with start_run("logreg", params={...}, tags={...}, hypothesis="...") as run:
         ...
         run.log_metrics(metrics)
         run.log_artifact(path)
+        run.set_conclusion("...")
 """
 
 import contextlib
@@ -199,14 +200,32 @@ class Run:
         """Attach an in-memory string as a text artifact (e.g. pip freeze output)."""
         mlflow.log_text(text, filename)
 
+    # Added (v1.4): the prediction made before training started, and whether
+    # it held up. `hypothesis` is set by start_run() itself; this is the
+    # other half, called once the metrics are in.
+    def set_conclusion(self, text: str) -> None:
+        """Record what actually happened, next to the hypothesis logged at the start."""
+        mlflow.set_tag("conclusion", text)
+
     def log_sklearn_model(self, model, artifact_path: str = "model") -> None:
         """Log a fitted estimator in MLflow's own (loadable) model format."""
         # `artifact_path` was renamed to `name` in mlflow 3; support both so the
         # run is logged whichever major version is installed.
+        # Added (v1.4): skops (mlflow's safe-serialization backend) refuses to
+        # save a few internal sklearn types by default, unless told they're
+        # trusted - CalibratedClassifierCV (used for linear_svc) is one of
+        # them. We trust these since we always logged a model we just
+        # trained ourselves, never one loaded from elsewhere.
+        trusted = [
+            "sklearn.calibration._CalibratedClassifier",
+            "sklearn.calibration._SigmoidCalibration",
+        ]
         try:
-            mlflow.sklearn.log_model(model, name=artifact_path)
+            mlflow.sklearn.log_model(model, name=artifact_path, skops_trusted_types=trusted)
         except TypeError:
-            mlflow.sklearn.log_model(model, artifact_path=artifact_path)
+            mlflow.sklearn.log_model(
+                model, artifact_path=artifact_path, skops_trusted_types=trusted
+            )
 
 
 def log_feature_inputs(run: "Run") -> None:
@@ -248,12 +267,18 @@ def log_environment(run: "Run") -> None:
 
 
 @contextlib.contextmanager
-def start_run(run_name: str, params: dict | None = None, tags: dict | None = None):
+def start_run(
+    run_name: str,
+    params: dict | None = None,
+    tags: dict | None = None,
+    hypothesis: str | None = None,  # Added (v1.4)
+):
     """Open a tracked run in the project experiment and yield its `Run` handle.
 
     The git commit and the dataset reference (`dvc.lock`) are attached
     automatically, so a run always answers "which code and which data produced
-    this?".
+    this?". `hypothesis`, if given, is logged as a tag before training starts -
+    call `run.set_conclusion(...)` once the metrics are in to close the loop.
     """
     mlflow.set_tracking_uri(tracking_uri())
     ensure_experiment()
@@ -265,6 +290,8 @@ def start_run(run_name: str, params: dict | None = None, tags: dict | None = Non
         if commit:
             all_tags["git_commit"] = commit
         all_tags["git_dirty"] = str(git_dirty()).lower()
+        if hypothesis:
+            all_tags["hypothesis"] = hypothesis
         mlflow.set_tags(all_tags)
         run.log_params(params or {})
         # dvc.lock pins the content hash of every input artifact - this is the
