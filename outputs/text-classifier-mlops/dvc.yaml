@@ -1,0 +1,32 @@
+stages:
+  prepare:
+    cmd: python -m text_classifier.data
+    deps:
+      - data/raw/support_tickets.csv
+      - src/text_classifier/data.py
+      - src/text_classifier/text.py
+    params:
+      - seed
+      - data
+    outs:
+      - data/processed/train.csv
+      - data/processed/test.csv
+      - data/processed/validation_report.json
+  train:
+    cmd: python -m text_classifier.train
+    deps:
+      - data/processed/train.csv
+      - data/processed/test.csv
+      - src/text_classifier/train.py
+    params:
+      - seed
+      - features
+      - training
+    outs:
+      - models/model.joblib
+      - models/metadata.json
+      - data/processed/reference.json
+    metrics:
+      - reports/model_comparison.json
+      - reports/evaluation.json
+

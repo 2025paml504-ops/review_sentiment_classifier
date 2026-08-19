@@ -1,0 +1,91 @@
+{
+  "labels": [
+    "account",
+    "billing",
+    "delivery",
+    "refund",
+    "technical"
+  ],
+  "confusion_matrix": [
+    [
+      6,
+      0,
+      0,
+      0,
+      0
+    ],
+    [
+      0,
+      5,
+      1,
+      0,
+      0
+    ],
+    [
+      0,
+      0,
+      6,
+      0,
+      0
+    ],
+    [
+      0,
+      1,
+      1,
+      4,
+      0
+    ],
+    [
+      0,
+      0,
+      0,
+      0,
+      6
+    ]
+  ],
+  "report": {
+    "account": {
+      "precision": 1.0,
+      "recall": 1.0,
+      "f1-score": 1.0,
+      "support": 6.0
+    },
+    "billing": {
+      "precision": 0.8333333333333334,
+      "recall": 0.8333333333333334,
+      "f1-score": 0.8333333333333334,
+      "support": 6.0
+    },
+    "delivery": {
+      "precision": 0.75,
+      "recall": 1.0,
+      "f1-score": 0.8571428571428571,
+      "support": 6.0
+    },
+    "refund": {
+      "precision": 1.0,
+      "recall": 0.6666666666666666,
+      "f1-score": 0.8,
+      "support": 6.0
+    },
+    "technical": {
+      "precision": 1.0,
+      "recall": 1.0,
+      "f1-score": 1.0,
+      "support": 6.0
+    },
+    "accuracy": 0.9,
+    "macro avg": {
+      "precision": 0.9166666666666667,
+      "recall": 0.9,
+      "f1-score": 0.8980952380952381,
+      "support": 30.0
+    },
+    "weighted avg": {
+      "precision": 0.9166666666666666,
+      "recall": 0.9,
+      "f1-score": 0.8980952380952381,
+      "support": 30.0
+    }
+  }
+}

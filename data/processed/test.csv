@@ -1,0 +1,31 @@
+text,label
+My card was declined,billing
+"Hi support, when will the item be dispatched. #11",delivery
+My order is late,delivery
+"Hi support, my billing address is incorrect Can you help? #9",billing
+"Hello, my package is missing please #10",delivery
+The app crashes when I open it,technical
+Someone accessed my profile,account
+"Hi support, my order is late Can you help? #2",delivery
+why was i charged after cancellation as soon as possible #12,billing
+i found a bug in checkout #10,technical
+Urgent: the latest update broke the app as soon as possible #5,technical
+The courier says delivery failed,delivery
+The product does not match the description,refund
+"Hi support, i changed my mind about the purchase #9",refund
+The mobile app is very slow,technical
+"Hi support, my invoice has the wrong amount #2",billing
+Urgent: notifications stopped working please #4,technical
+"Hello, the parcel arrived damaged #4",delivery
+"Hi support, the payment is still pending #10",billing
+i need to change my email address Can you help? #4,account
+My verification code never arrived,account
+The payment is still pending,billing
+"Hello, what is the return policy #7",refund
+"Hello, i want to reactivate my account Can you help? #11",account
+Can I exchange instead of returning,refund
+The download keeps failing,technical
+How do I close my account,account
+I cannot log into my account,account
+"Hi support, i received the wrong item and want my money back #6",refund
+Please help: can i exchange instead of returning as soon as possible #12,refund

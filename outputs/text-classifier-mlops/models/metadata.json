@@ -1,0 +1,39 @@
+{
+  "model_name": "naive_bayes",
+  "model_version": "20260819T092729Z",
+  "created_at": "2026-08-19T09:27:29.351418+00:00",
+  "labels": [
+    "account",
+    "billing",
+    "delivery",
+    "refund",
+    "technical"
+  ],
+  "metrics": {
+    "accuracy": 0.9,
+    "macro_f1": 0.8980952380952381,
+    "weighted_f1": 0.8980952380952381
+  },
+  "dataset": {
+    "class_counts": {
+      "account": 24,
+      "billing": 24,
+      "delivery": 24,
+      "refund": 24,
+      "technical": 24
+    },
+    "dropped_duplicate_rows": 0,
+    "dropped_empty_rows": 0,
+    "dropped_null_rows": 0,
+    "seed": 42,
+    "sha256": "9f69101b25d4b6520b5c9670ec5a307031094e189d58a07b705340e23f41ffbf",
+    "source": "C:\\Users\\91974\\Documents\\Codex\\2026-08-19\\objectives-design-and-implement-a-reliable\\data\\raw\\support_tickets.csv",
+    "source_rows": 120,
+    "test_rows": 30,
+    "train_rows": 90,
+    "valid_rows": 120
+  },
+  "python": "3.12.13",
+  "platform": "Windows-11-10.0.26200-SP0",
+  "sklearn": "1.9.0"
+}

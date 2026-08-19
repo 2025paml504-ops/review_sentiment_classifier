@@ -1,0 +1,24 @@
+{
+  "champion": "naive_bayes",
+  "primary_metric": "macro_f1",
+  "models": {
+    "logistic_regression": {
+      "accuracy": 0.8666666666666667,
+      "macro_f1": 0.8614985014985015,
+      "weighted_f1": 0.8614985014985016,
+      "run_id": "45555573464941fd867c0758b554c352"
+    },
+    "linear_svm": {
+      "accuracy": 0.8666666666666667,
+      "macro_f1": 0.8614985014985015,
+      "weighted_f1": 0.8614985014985016,
+      "run_id": "c4a9c850638f4ed5ab195d97057ab152"
+    },
+    "naive_bayes": {
+      "accuracy": 0.9,
+      "macro_f1": 0.8980952380952381,
+      "weighted_f1": 0.8980952380952381,
+      "run_id": "aa29ac56094444ba989cdc98326d6b59"
+    }
+  }
+}

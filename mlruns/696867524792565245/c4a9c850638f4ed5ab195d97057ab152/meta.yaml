@@ -1,0 +1,14 @@
+artifact_uri: file:///C:/Users/91974/Documents/Codex/2026-08-19/objectives-design-and-implement-a-reliable/mlruns/696867524792565245/c4a9c850638f4ed5ab195d97057ab152/artifacts
+end_time: 1787131649084
+entry_point_name: ''
+experiment_id: '696867524792565245'
+lifecycle_stage: active
+run_id: c4a9c850638f4ed5ab195d97057ab152
+run_name: linear_svm
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1787131648752
+status: 3
+tags: []
+user_id: '91974'

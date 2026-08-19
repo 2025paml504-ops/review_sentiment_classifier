@@ -1,0 +1,14 @@
+artifact_uri: file:///C:/Users/91974/Documents/Codex/2026-08-19/objectives-design-and-implement-a-reliable/mlruns/696867524792565245/45555573464941fd867c0758b554c352/artifacts
+end_time: 1787131648734
+entry_point_name: ''
+experiment_id: '696867524792565245'
+lifecycle_stage: active
+run_id: 45555573464941fd867c0758b554c352
+run_name: logistic_regression
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1787131648309
+status: 3
+tags: []
+user_id: '91974'

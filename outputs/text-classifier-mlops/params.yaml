@@ -1,0 +1,34 @@
+seed: 42
+data:
+  path: data/raw/support_tickets.csv
+  text_column: text
+  label_column: label
+  allowed_labels: [account, billing, delivery, refund, technical]
+  min_rows: 50
+  test_size: 0.25
+features:
+  max_features: 12000
+  ngram_range: [1, 2]
+  min_df: 1
+  max_df: 0.98
+training:
+  primary_metric: macro_f1
+  experiment_name: support-ticket-intent
+  mlflow_tracking_uri: mlruns
+  models: [logistic_regression, linear_svm, naive_bayes]
+serving:
+  model_path: models/model.joblib
+  metadata_path: models/metadata.json
+  prediction_log: logs/predictions.jsonl
+  max_text_length: 5000
+  low_confidence_threshold: 0.55
+monitoring:
+  reference_path: data/processed/reference.json
+  min_events: 50
+  oov_rate_threshold: 0.25
+  length_psi_threshold: 0.20
+  prediction_js_threshold: 0.15
+  low_confidence_rate_threshold: 0.30
+  minimum_macro_f1: 0.75
+  signals_to_trigger: 2
+

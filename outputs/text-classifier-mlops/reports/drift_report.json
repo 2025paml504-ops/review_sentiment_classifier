@@ -1,0 +1,28 @@
+{
+  "event_count": 61,
+  "status": "drift_detected",
+  "breached_signals": 3,
+  "retrain": true,
+  "signals": {
+    "oov_rate": {
+      "value": 0.800613,
+      "threshold": 0.25,
+      "breached": true
+    },
+    "length_psi": {
+      "value": 4.857818,
+      "threshold": 0.2,
+      "breached": true
+    },
+    "prediction_js": {
+      "value": 0.138747,
+      "threshold": 0.15,
+      "breached": false
+    },
+    "low_confidence_rate": {
+      "value": 0.655738,
+      "threshold": 0.3,
+      "breached": true
+    }
+  }
+}
