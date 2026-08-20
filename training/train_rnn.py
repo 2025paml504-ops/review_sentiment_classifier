@@ -1,36 +1,44 @@
-"""Recurrent (RNN / LSTM / BiLSTM) sentiment classifier (v1.2).
+"""Train a recurrent (LSTM/BiLSTM/RNN) sentiment classifier from scratch.
 
-    The third model family, next to the TF-IDF linear baseline
-    (`training/train_linear.py`) and the transformer fine-tune
-    (`training/train_transformer.py`). It reads the *same* splits,
-    `data/processed/train_v1.csv` / `test_v1.csv`, so its macro-F1 is directly
-    comparable, and writes metrics in the same JSON shape.
+The third model family, next to the TF-IDF linear baseline
+(`training/train_linear.py`) and the transformer fine-tune
+(`training/train_transformer.py`). It reads the *same* splits,
+`data/processed/train_v1.csv` / `test_v1.csv`, so its macro-F1 is directly
+comparable, and writes metrics in the same JSON shape.
 
-    Why this is a separate module and not a branch of `train_linear.py`: a
-    recurrent net consumes an **ordered sequence of token ids**, while
-    `train_linear.py` works on the TF-IDF matrix, which is an unordered
-    bag-of-ngrams weighting. Feeding TF-IDF rows to an `Embedding`/`LSTM` (even
-    after padding) destroys the only thing a recurrent model adds - word order -
-    and turns a 20k-dimensional sparse matrix into a dense one, which is
-    hundreds of GB over the full split. So this trainer builds its own
-    vocabulary from the training text and never touches the vectorizer.
+Why this is a separate module and not a branch of `train_linear.py`: a
+recurrent net consumes an **ordered sequence of token ids**, while
+`train_linear.py` works on the TF-IDF matrix, an unordered bag-of-ngrams
+weighting. Feeding TF-IDF rows into an Embedding/LSTM would destroy the
+one thing a recurrent model actually adds - word order - and blow up into
+a dense matrix hundreds of GB in size. So this trainer builds its own word
+vocabulary from the training text and never touches the TF-IDF vectorizer.
 
-    Built on **PyTorch**, not Keras: this project runs on Python 3.14, for which
-    TensorFlow publishes no wheels, while torch is already a dependency of the
-    transformer stage (decisions §20). `torch` is heavy and imported lazily, so
-    the rest of the pipeline runs without it.
+Built on **PyTorch**, not Keras: this project runs on a Python version
+TensorFlow doesn't publish wheels for, and torch is already a dependency of
+the transformer stage. `torch` itself is heavy and imported lazily inside
+each function that needs it, so importing this module - or running the
+rest of the pipeline - never requires it.
 
-    Every run is recorded as an MLflow run (`training/tracking.py`) in the same
-    `review_sentiment` experiment, with the same parameter names, metric names
-    (macro-F1, weighted-F1, accuracy, ROC-AUC, per-class scores) and artifacts,
-    so all three families rank side by side in `mlflow ui` and in
-    `python -m training.compare_runs`.
+How this file is organized, top to bottom, following the order the code
+actually runs in:
 
-    This is the `train_rnn` stage in `dvc.yaml`. Standalone:
+    - Config             - architectures, hyperparameters, hypothesis text
+    - Data loading        - load_split()
+    - Text -> numbers     - build_vocabulary(), encode(), sequence_lengths()
+      (this step has no equivalent in train_linear.py - TF-IDF handles it
+      there; here we do it by hand)
+    - Model building      - build_model() (the PyTorch network itself)
+    - Scoring helpers     - class_weights(), full_metrics(), predict_proba()
+    - train()             - the actual pipeline: load -> encode -> build ->
+      fit (epoch loop) -> evaluate -> save
+    - CLI                 - what happens when you run this file directly
 
-        python -m training.train_rnn --limit 5000 --epochs 1   # smoke test
-        python -m training.train_rnn                           # full run
-        python -m training.train_rnn --arch rnn_bilstm         # other architectures
+Run it:
+
+    python -m training.train_rnn --limit 5000 --epochs 1   # smoke test
+    python -m training.train_rnn                           # full run
+    python -m training.train_rnn --arch rnn_bilstm          # other architectures
 """
 
 import argparse
@@ -53,6 +61,9 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 MODEL_STORE = REPO_ROOT / "model_store"
 METRICS_DIR = Path(__file__).resolve().parent
 
+
+# ── Config ────────────────────────────────────────────────────────────
+
 # Sequence encoding. 0 is reserved for padding and 1 for out-of-vocabulary, so
 # real token ids start at 2 - the usual convention for text pipelines.
 PAD_ID = 0
@@ -64,9 +75,9 @@ MAX_LENGTH = 200
 EMBEDDING_DIM = 128
 RECURRENT_UNITS = 128
 DROPOUT = 0.2
-# 4 epochs tried (v1.2): val loss kept dropping (0.689 -> 0.687) but
-# macro-F1 fell 0.6436 -> 0.6393 - epoch 4 overfits the metric that matters,
-# even though raw loss looked fine. Reverted to 3.
+# 4 epochs tried once: val loss kept dropping (0.689 -> 0.687) but macro-F1
+# fell 0.6436 -> 0.6393 - epoch 4 overfits the metric that matters, even
+# though raw loss looked fine. Reverted to 3.
 EPOCHS = 3
 BATCH_SIZE = 128
 LEARNING_RATE = 1e-3
@@ -77,7 +88,8 @@ VALIDATION_SPLIT = 0.1
 ARCHITECTURES = ("rnn_lstm", "rnn_bilstm", "rnn_simple")
 DEFAULT_ARCH = "rnn_lstm"
 
-# Added (v1.4): logged as a hypothesis tag before training (training/tracking.py).
+# What this config is expected to show, logged as an MLflow tag before
+# training starts and checked against the real result afterward.
 HYPOTHESIS_TEMPLATE = (
     "Training for {epochs} epochs will keep macro-F1 at or above the proven "
     "3-epoch baseline - a 4th epoch previously overfit the metric that "
@@ -102,7 +114,10 @@ def metrics_path(arch: str) -> Path:
     return METRICS_DIR / f"metrics_{arch}.json"
 
 
+# ── Data loading ──────────────────────────────────────────────────────
+
 def load_split(path: Path, limit: int | None = None) -> pd.DataFrame:
+    """Read a train/test split written by features/vectorize.py."""
     if not path.exists():
         raise FileNotFoundError(f"{path} missing - run `dvc repro vectorize` first")
     df = pd.read_csv(path, nrows=limit)
@@ -111,6 +126,10 @@ def load_split(path: Path, limit: int | None = None) -> pd.DataFrame:
     df["label"] = df["sentiment"].map(LABEL2ID)
     return df.reset_index(drop=True)
 
+
+# ── Text -> numbers ───────────────────────────────────────────────────
+# A recurrent network can't read words directly - every word first needs a
+# number. These three functions build that mapping and apply it.
 
 def build_vocabulary(texts, num_words: int = NUM_WORDS) -> dict[str, int]:
     """Word index of the `num_words` most frequent training tokens.
@@ -146,8 +165,10 @@ def sequence_lengths(encoded: np.ndarray) -> np.ndarray:
     return np.maximum((encoded != PAD_ID).sum(axis=1), 1).astype("int64")
 
 
+# ── Model building ────────────────────────────────────────────────────
+
 def build_model(arch: str, vocab_size: int):
-    """Embedding -> recurrent layer -> dropout -> logits over the three classes."""
+    """Embedding -> recurrent layer -> dropout -> logits over the classes."""
     import torch
     from torch import nn
     from torch.nn.utils.rnn import pack_padded_sequence
@@ -189,12 +210,14 @@ def build_model(arch: str, vocab_size: int):
     return RecurrentClassifier()
 
 
+# ── Scoring helpers ───────────────────────────────────────────────────
+
 def class_weights(y_train: np.ndarray) -> dict[int, float]:
     """Balanced weights, so the loss matches the linear baseline's objective.
 
-    The baseline uses `class_weight="balanced"` ([Decisions §17](../docs/design/decisions.md));
-    without the same treatment the macro-F1 of the two families would be
-    optimising different things.
+    The baseline uses `class_weight="balanced"` (decisions.md #17); without
+    the same treatment the macro-F1 of the two families would be optimising
+    different things.
     """
     from sklearn.utils.class_weight import compute_class_weight
 
@@ -203,11 +226,13 @@ def class_weights(y_train: np.ndarray) -> dict[int, float]:
     return {int(label): float(weight) for label, weight in zip(present, weights)}
 
 
-# Added (v1.2): confidence_threshold param, mirroring train_linear.py's
-# evaluate() - same abstention idea, deferring instead of forcing a guess.
-# Reuses the softmax probabilities already computed for ROC-AUC, so it's free.
 def full_metrics(y_true, y_pred, probabilities=None, confidence_threshold: float | None = None) -> dict:
-    """Score in the *same shape* as the other two trainers."""
+    """Score in the *same shape* as the other two trainers.
+
+    `confidence_threshold` is optional abstention, mirroring
+    train_linear.py's `evaluate()` - reuses the softmax probabilities
+    already computed for ROC-AUC, so it's free.
+    """
     from sklearn.metrics import (
         accuracy_score,
         classification_report,
@@ -225,19 +250,29 @@ def full_metrics(y_true, y_pred, probabilities=None, confidence_threshold: float
         "weighted_f1": float(f1_score(y_true, y_pred, average="weighted", zero_division=0)),
         "accuracy": float(accuracy_score(y_true, y_pred)),
     }
+    # Binary (2 classes) only needs the positive class's probability and no
+    # averaging; 3+ classes need scikit-learn's one-vs-rest averaging
+    # instead, which expects the full per-class probability matrix.
     if probabilities is not None:
-        for average in ("macro", "weighted"):
+        if len(label_ids) == 2:
             try:
-                metrics[f"roc_auc_{average}"] = float(
-                    roc_auc_score(
-                        y_true, probabilities, multi_class="ovr",
-                        average=average, labels=label_ids,
-                    )
-                )
+                auc = float(roc_auc_score(y_true, probabilities[:, 1]))
+                metrics["roc_auc_macro"] = auc
+                metrics["roc_auc_weighted"] = auc
             except ValueError as exc:
-                logger.warning("ROC-AUC (%s) not computable: %s", average, exc)
+                logger.warning("ROC-AUC not computable: %s", exc)
+        else:
+            for average in ("macro", "weighted"):
+                try:
+                    metrics[f"roc_auc_{average}"] = float(
+                        roc_auc_score(
+                            y_true, probabilities, multi_class="ovr",
+                            average=average, labels=label_ids,
+                        )
+                    )
+                except ValueError as exc:
+                    logger.warning("ROC-AUC (%s) not computable: %s", average, exc)
 
-        # Added (v1.2)
         if confidence_threshold is not None:
             confidence = probabilities.max(axis=1)
             thresholded_pred = probabilities.argmax(axis=1)
@@ -269,7 +304,7 @@ def full_metrics(y_true, y_pred, probabilities=None, confidence_threshold: float
 def run_params(arch: str, epochs: int, batch_size: int, learning_rate: float,
                vocab_size: int, limit: int | None,
                confidence_threshold: float | None = None) -> dict:
-    """The knobs worth logging, named like the other trainers' so the UI aligns them."""
+    """The settings worth logging, named like the other trainers' so the UI aligns them."""
     return {
         "model_name": arch,
         "model.framework": "pytorch",
@@ -288,7 +323,6 @@ def run_params(arch: str, epochs: int, batch_size: int, learning_rate: float,
         "limit": limit if limit is not None else "none",
         "train_csv": TRAIN_CSV.name,
         "test_csv": TEST_CSV.name,
-        # Added (v1.2)
         "confidence_threshold": confidence_threshold if confidence_threshold is not None else "none",
     }
 
@@ -309,14 +343,17 @@ def predict_proba(model, encoded: np.ndarray, batch_size: int) -> np.ndarray:
     return np.concatenate(outputs) if outputs else np.zeros((0, len(SENTIMENT_LABELS)))
 
 
+# ── train() - the actual pipeline ────────────────────────────────────
+
 def train(
     arch: str = DEFAULT_ARCH,
     epochs: int = EPOCHS,
     batch_size: int = BATCH_SIZE,
     learning_rate: float = LEARNING_RATE,
     limit: int | None = None,
-    confidence_threshold: float | None = None,  # Added (v1.2)
+    confidence_threshold: float | None = None,
 ) -> dict:
+    """Load data -> build vocab -> encode -> fit (epoch loop) -> evaluate -> save."""
     import torch
     from torch import nn
     from torch.utils.data import DataLoader, TensorDataset, random_split
@@ -325,26 +362,27 @@ def train(
     torch.manual_seed(RANDOM_STATE)
     np.random.seed(RANDOM_STATE)
 
+    # Step 1: load the raw text splits.
     train_df = load_split(TRAIN_CSV, limit)
     test_df = load_split(TEST_CSV, limit)
 
+    # Step 2: turn text into fixed-length integer sequences.
     vocab = build_vocabulary(train_df["clean_review"])
-    # +2 for the reserved padding and out-of-vocabulary ids.
-    vocab_size = len(vocab) + 2
-
+    vocab_size = len(vocab) + 2  # +2 for the reserved padding and OOV ids
     X_train = encode(train_df["clean_review"], vocab)
     X_test = encode(test_df["clean_review"], vocab)
     y_train = train_df["label"].to_numpy(dtype="int64")
     y_test = test_df["label"].to_numpy(dtype="int64")
-
     logger.info(
         "train %s, test %s, vocab %d, arch %s", X_train.shape, X_test.shape, vocab_size, arch
     )
 
+    # Step 3: build the (untrained) model.
     model = build_model(arch, vocab_size)
     tags = {"stage": "train_rnn", "framework": "pytorch", "smoke_test": str(limit is not None)}
     params = run_params(arch, epochs, batch_size, learning_rate, vocab_size, limit, confidence_threshold)
 
+    # Step 4: set up batching, a held-out validation slice, and the loss/optimizer.
     dataset = TensorDataset(
         torch.from_numpy(X_train),
         torch.from_numpy(sequence_lengths(X_train)),
@@ -366,6 +404,8 @@ def train(
     criterion = nn.CrossEntropyLoss(weight=weight_tensor)
     optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate)
 
+    # Step 5: train for `epochs` passes over the data, evaluate, and log
+    # everything to MLflow in one tracked run.
     hypothesis = HYPOTHESIS_TEMPLATE.format(epochs=epochs)
     with tracking.start_run(arch, params, tags, hypothesis=hypothesis) as run:
         for epoch in range(epochs):
@@ -398,24 +438,25 @@ def train(
             if seen:
                 run.log_metric_step("val.loss", validation_loss, step=epoch)
 
+        # Step 6: score on the held-out test split.
         probabilities = predict_proba(model, X_test, batch_size)
         y_pred = np.argmax(probabilities, axis=1)
-
         metrics = full_metrics(y_test, y_pred, probabilities, confidence_threshold)
         metrics["model"] = arch
         metrics["n_train"] = int(X_train.shape[0])
         metrics["n_test"] = int(X_test.shape[0])
         metrics["n_features"] = int(vocab_size)
 
+        # Step 7: save the model. The vocabulary is part of the model - a
+        # checkpoint on its own can't turn words back into ids without it.
         MODEL_STORE.mkdir(parents=True, exist_ok=True)
-        # The weights alone are meaningless without the shape that produced
-        # them, so the checkpoint carries the architecture and vocab size too.
         torch.save(
             {"arch": arch, "vocab_size": vocab_size, "state_dict": model.state_dict()},
             model_path(arch),
         )
         vocab_path(arch).write_text(json.dumps(vocab), encoding="utf-8")
 
+        # Step 8: log the run's record.
         run.log_metrics(metrics)
         run.log_dict(metrics["confusion_matrix"], "confusion_matrix.json")
         run.log_artifact(model_path(arch), "model")
@@ -425,8 +466,8 @@ def train(
             f"after {epochs} epoch(s)."
         )
 
-        # Smoke runs (--limit) must not overwrite the scored metrics file that
-        # DVC tracks; the run itself is still recorded, tagged smoke_test=True.
+        # A smoke run (--limit) must not overwrite the scored metrics file
+        # DVC tracks - the run itself is still recorded, tagged smoke_test=True.
         if limit is None:
             metrics_path(arch).write_text(json.dumps(metrics, indent=2), encoding="utf-8")
             run.log_artifact(metrics_path(arch))
@@ -438,6 +479,8 @@ def train(
     return metrics
 
 
+# ── CLI ───────────────────────────────────────────────────────────────
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--arch", default=DEFAULT_ARCH, choices=sorted(ARCHITECTURES))
@@ -445,7 +488,6 @@ if __name__ == "__main__":
     parser.add_argument("--batch-size", type=int, default=BATCH_SIZE)
     parser.add_argument("--learning-rate", type=float, default=LEARNING_RATE)
     parser.add_argument("--limit", type=int, default=None, help="only read the first N rows")
-    # Added (v1.2): same opt-in abstention as train_linear.py
     parser.add_argument(
         "--confidence-threshold", type=float, default=None,
         help="abstain below this confidence; logs coverage and accuracy_at_threshold",

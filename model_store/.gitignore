@@ -7,3 +7,4 @@
 # (v1.2).
 /rnn_*_v1.pt
 /rnn_*_v1_vocab.json
+/bert_tiny_v1

@@ -1,35 +1,35 @@
 # Model leaderboard
 
-Generated 2026-08-13 10:00 UTC by `python -m training.compare_runs --md`, ranked by `macro_f1`, one row per model (its best completed run). Source: MLflow (`mlflow.db`, local/git-ignored) -- re-run after training to refresh.
+Generated 2026-08-20 11:20 UTC by `python -m training.compare_runs --md`, ranked by `macro_f1`, one row per model (its best completed run). Source: MLflow (`mlflow.db`, local/git-ignored) -- re-run after training to refresh.
 
-**Best model: `rnn_lstm`** (`macro_f1` = 0.6488).
+**Best model: `rnn_lstm`** (`macro_f1` = 0.8918).
 
 ```
-Run ID   : 9f0f73731f404cd6a3267aa03cb48943
-Started  : 2026-08-13 05:53
+Run ID   : 964de3888934451e85f23102f141d7d5
+Started  : 2026-08-20 09:49
 Model    : rnn_lstm
-Accuracy : 0.7060
-ROC-AUC  : 0.8614
-F1       : 0.6488
+Accuracy : 0.9434
+ROC-AUC  : 0.9849
+F1       : 0.8918
 
-Run ID   : c366fa9a434547a3bde151823eb940fd
-Started  : 2026-08-13 07:19
-Model    : google/bert_uncased_L-4_H-256_A-4
-Accuracy : 0.7093
-ROC-AUC  : 0.8609
-F1       : 0.6461
-
-Run ID   : 2ab4fad61a4c4137be7f32ea1eef9144
-Started  : 2026-08-13 05:31
-Model    : logreg
-Accuracy : 0.6896
-ROC-AUC  : 0.8493
-F1       : 0.6252
-
-Run ID   : 0f89cabfb6d94fbb995e3de93827bc50
-Started  : 2026-08-11 17:25
+Run ID   : 7865468f90274fd5a7d639ed96832836
+Started  : 2026-08-20 09:47
 Model    : linear_svc
-Accuracy : 0.7206
-ROC-AUC  : -
-F1       : 0.6225
+Accuracy : 0.9412
+ROC-AUC  : 0.9671
+F1       : 0.8652
+
+Run ID   : 97bb3982e0f64ed8963063fdc22e7219
+Started  : 2026-08-20 10:25
+Model    : google/bert_uncased_L-2_H-128_A-2
+Accuracy : 0.9208
+ROC-AUC  : 0.9704
+F1       : 0.8519
+
+Run ID   : 959e7569dd5441a4a6f4e2a7b1f03276
+Started  : 2026-08-20 11:16
+Model    : logreg
+Accuracy : 0.9073
+ROC-AUC  : 0.9690
+F1       : 0.8358
 ```

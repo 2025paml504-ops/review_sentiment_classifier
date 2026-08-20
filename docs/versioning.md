@@ -44,7 +44,7 @@ unchanged.
 ## Naming convention
 
 The `_v1` suffix (`train_v1.csv`, `tfidf_vectorizer_v1.pkl`, `logreg_v1.pkl`,
-`linear_svc_v1.pkl`, `rnn_lstm_v1.pt`, `bert_mini_v1/`, …) is a human-readable
+`linear_svc_v1.pkl`, `rnn_lstm_v1.pt`, `bert_tiny_v1/`, …) is a human-readable
 label that coexists with DVC's content hashes — one artifact set per trained
 model, all versioned against the same data contract. Bump to `_v2` when the
 cleaning/tokenization logic, the sentiment labeling thresholds, or the
@@ -56,6 +56,17 @@ The current **v1 contract** is: Scheme A sentiment thresholds
 (`NEGATIVE < 6`, `6 ≤ NEUTRAL < 8`, `POSITIVE ≥ 8` on `Reviewer_Score`) and the
 column schema in `validation/feature_column.json`.
 
+**Note on v1.5 (this branch).** The contract above is superseded here, not
+just its implementation - sentiment is no longer a `Reviewer_Score`
+threshold at all. Labels are now VADER's compound-score judgment of
+`full_review` text directly (binary: NEGATIVE / POSITIVE, `compound < 0.0`
+vs `>= 0.0`), at the user's explicit request, after manually spot-checking
+score-vs-text disagreements near the old boundary. This is exactly the kind
+of change the naming convention's `_v2` rule is meant to catch - unlike
+v1.1's cleaning-only change, this really does redefine what a label means,
+so artifacts produced under it are `_v2` in spirit even where the filename
+suffix hasn't been renamed yet.
+
 ## Version history
 
 | Version | Change | Impact | [Decisions](design/decisions.md) sections |
@@ -65,6 +76,7 @@ column schema in `validation/feature_column.json`.
 | **1.2** | Four training stages + MLflow tracking; negation-scope and placeholder-leak bug fixes; tuning experiments logged; leaderboard export; `pip freeze` per run | New model artifacts; 503,446 rows after dedup fix | §13–20, most of §21 |
 | **1.3** | Leaderboard ranks by best run, not latest; documented `mlruns/`; Reproducibility section added; RNN epochs re-verified | Docs/tooling only | §21 |
 | **1.4** | `linear_svc` calibration experiment; hypothesis/conclusion MLflow tags; served model switched (`logreg` → `bert_mini` → `rnn_lstm`); Docker packaging; UI added | Serving/UI only; no data-contract change | §16, §21–23 |
+| **1.5** | Sentiment relabeled: VADER on `full_review` replaces `Reviewer_Score` thresholding, binary NEGATIVE/POSITIVE (not 3-class); `logreg` de-weighted (`lbfgs`, no `class_weight`); transformer base tried `bert-mini` → `distilbert-base-uncased` (too slow on CPU) → `bert-tiny`; binary ROC-AUC bug fixed in all three trainers; all four models retrained and `rnn_lstm` re-confirmed as the served model; `model_version` + response bounds added to the API | Real data-contract change (`_v2` in spirit, see note above); 68,163 NEGATIVE / 435,283 POSITIVE rows | §3, §13–15, §17, §21–22 |
 
 Experiment tracking (MLflow) and reproducibility are covered in
 [Pipeline](pipeline.md#experiment-tracking), not here — this file is DVC's

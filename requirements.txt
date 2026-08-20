@@ -6,6 +6,9 @@ SQLAlchemy
 scikit-learn
 joblib
 dvc
+# Sentiment labeling (features/build_features.py, added v1.4): VADER scores
+# full_review directly, replacing the old Reviewer_Score threshold.
+vaderSentiment
 # Experiment tracking (training/tracking.py): required by both training stages.
 mlflow
 

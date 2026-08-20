@@ -1,11 +1,11 @@
 # Serving
 
-REST API for the sentiment classifier (M4). Serves `rnn_lstm` - the highest
-macro-F1 of the four trained models on the current data, and macro-F1 is the
-metric this whole project has used throughout. See [Decisions §22](../docs/design/decisions.md)
-for the full reasoning, including why `bert_mini` was the pick on an earlier
-data snapshot and a calibration experiment on `linear_svc` that raised its
-accuracy but lowered its macro-F1.
+REST API for the sentiment classifier. Serves `rnn_lstm` - the highest
+macro-F1 of the four trained models (0.8918, a clear margin over the
+next-best model's 0.8652), and macro-F1 is the metric this whole project
+has used throughout. See [Decisions §22](../docs/design/decisions.md) for
+the full four-way comparison and a calibration experiment on `linear_svc`
+that raised its accuracy but lowered its macro-F1.
 
 ## Run it
 
@@ -30,7 +30,7 @@ need to already exist. Run `dvc repro train_rnn` first if they don't (see
 curl http://127.0.0.1:8000/health
 ```
 ```json
-{"status": "ok", "model": "rnn_lstm", "model_path": "...model_store\\rnn_lstm_v1.pt"}
+{"status": "ok", "model": "rnn_lstm", "model_version": "rnn_lstm_v1", "model_path": "...model_store\\rnn_lstm_v1.pt"}
 ```
 
 ### `POST /predict`
@@ -43,9 +43,10 @@ curl -X POST http://127.0.0.1:8000/predict \
 ```json
 {
   "sentiment": "POSITIVE",
-  "confidence": 0.9808,
-  "probabilities": {"NEGATIVE": 0.0006, "NEUTRAL": 0.0186, "POSITIVE": 0.9808},
-  "latency_ms": 17.43
+  "confidence": 0.9998,
+  "probabilities": {"NEGATIVE": 0.0002, "POSITIVE": 0.9998},
+  "latency_ms": 115.88,
+  "model_version": "rnn_lstm_v1"
 }
 ```
 
@@ -56,7 +57,7 @@ Negation is handled correctly - this is the bug fix from
 curl -X POST http://127.0.0.1:8000/predict \
   -H "Content-Type: application/json" \
   -d '{"text": "This was not the best hotel, the room was dirty and the staff were rude"}'
-# -> {"sentiment": "NEGATIVE", "confidence": 0.9866, ...}
+# -> {"sentiment": "NEGATIVE", "confidence": 0.9984, ...}
 ```
 
 ## Edge cases (actually tested, not just handled in theory)
@@ -74,12 +75,12 @@ curl -X POST http://127.0.0.1:8000/predict \
 ## Latency / throughput
 
 Measured locally (`rnn_lstm`, CPU, sequential requests, no batching):
-**~69 req/s, ~14.5ms/request average**. Between the two extremes already
-measured on earlier versions of this API: `logreg` (~336 req/s, ~3ms/request)
-and `bert_mini` (~45 req/s, ~22ms/request) - a small trained-from-scratch
-recurrent net costs more than a linear model but far less than a full
-transformer. See [Decisions §22](../docs/design/decisions.md) for the full
-model-choice reasoning.
+**~69 req/s, ~14.5ms/request average**. An earlier version of this API
+serving `logreg` measured ~336 req/s, ~3ms/request - a small
+trained-from-scratch recurrent net costs more than a linear model, which
+is the real price of serving the model this project's own metric actually
+ranks best. See [Decisions §22](../docs/design/decisions.md) for the full
+four-way comparison and model-choice reasoning.
 
 ## UI
 

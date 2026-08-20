@@ -1,32 +1,31 @@
-"""FastAPI serving layer for the sentiment classifier (M4, added 12-Aug).
+"""FastAPI serving layer for the sentiment classifier (M4).
 
-Serves `rnn_lstm`, not `bert_mini`. Both were candidates on macro-F1 (this
-project's headline metric since Decisions §14, chosen because it doesn't let
-a model coast by mostly guessing the majority POSITIVE class), but which one
-actually wins changed after a data-cleaning bug fix (Decisions §10-12): on
-the older, buggier data bert_mini scored higher (0.6685); on the current,
-corrected data, rnn_lstm's kept 3-epoch config scores higher (0.6488 vs
-0.6461) and that result reproduces exactly on repeat runs. See Decisions §22
-for the full history, including the calibration experiment on `linear_svc`
-that raised its accuracy but lowered its macro-F1 - the same tradeoff this
-project keeps running into.
+Serves `rnn_lstm` - the model with the highest macro-F1 (this project's
+headline metric, decisions.md #14) on the current data. See decisions.md
+§22 for the full history of how the served model was chosen, and §23 for
+why the UI needs CORS enabled here.
 
-rnn_lstm also happens to be cheaper to serve than bert_mini would have been:
-no `transformers` dependency, just `torch` and a small vocabulary file.
+How this file is organized, top to bottom:
 
-Run locally:
+    - Config             - which model, where its files live, request limits
+    - Request/response contracts - the Pydantic contracts: what a caller
+      must send, and exactly what they get back
+    - Model              - the network architecture (must match
+      training/train_rnn.py exactly) and loading it once at startup
+    - Text -> numbers    - turning a request's raw text into what the
+      model actually expects
+    - Endpoints          - /health and /predict, the two things this API
+      actually does
+
+Run it:
 
     uvicorn serving.app:app --reload --port 8000
 
-Endpoints:
+Then:
 
-    GET  /health   - is it up, and which model is loaded
+    GET  /health   - is it up, and which model/version is loaded
     POST /predict  - {"text": "..."} -> sentiment, confidence, per-class
                       probabilities, and how long the request took
-
-CORS is open to any origin - this is a local dev API with no auth, and the
-static page in ui/ needs to call it from a plain file:// or a different
-localhost port, both of which browsers treat as cross-origin (Decisions §23).
 """
 
 import json
@@ -48,16 +47,22 @@ from features.build_features import SENTIMENT_LABELS, clean_text
 logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
 logger = logging.getLogger("serving")
 
+
+# ── Config ────────────────────────────────────────────────────────────
+
 REPO_ROOT = Path(__file__).resolve().parents[1]
 MODEL_NAME = "rnn_lstm"
+# Which artifact is actually serving, returned on every response so a
+# caller can tell two deployments apart without reading logs. Update this
+# whenever the served artifact changes (decisions.md §22).
+MODEL_VERSION = "rnn_lstm_v1"
 MODEL_PATH = REPO_ROOT / "model_store" / "rnn_lstm_v1.pt"
 VOCAB_PATH = REPO_ROOT / "model_store" / "rnn_lstm_v1_vocab.json"
 
-# These five constants and the RecurrentClassifier class below must match
-# training/train_rnn.py exactly - they describe the shape of the saved
-# weights, not a preference. Duplicated here rather than imported so serving
-# doesn't pull in train_rnn.py's own dependencies (feature_store, SQLAlchemy)
-# that it never actually needs at inference time.
+# These must match training/train_rnn.py exactly - they describe the shape
+# of the saved weights, not a preference. Duplicated here rather than
+# imported so serving doesn't pull in train_rnn.py's own dependencies
+# (feature_store, SQLAlchemy) that it never actually needs at inference time.
 PAD_ID = 0
 OOV_ID = 1
 MAX_LENGTH = 200
@@ -75,6 +80,9 @@ app = FastAPI(
     description="Serves the rnn_lstm model trained in training/train_rnn.py",
     version="2.0",
 )
+# Open to any origin - this is a local dev API with no auth, and the static
+# page in ui/ calls it from a different local port, which browsers treat
+# as a different origin (decisions.md §23).
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -82,6 +90,38 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+
+# ── Request/response contracts ───────────────────────────────────────
+# These are promises: exactly what a caller must send, and exactly what
+# they get back. FastAPI checks every request against PredictRequest before
+# predict() ever runs - a bad request never reaches the model at all.
+
+class PredictRequest(BaseModel):
+    text: str = Field(..., min_length=1, max_length=MAX_TEXT_LENGTH)
+
+    @field_validator("text")
+    @classmethod
+    def not_blank(cls, value: str) -> str:
+        # min_length=1 only catches a literally empty string; "   " gets past
+        # that but is blank in every way that matters.
+        if not value.strip():
+            raise ValueError("text must not be blank")
+        return value
+
+
+class PredictResponse(BaseModel):
+    sentiment: str
+    # ge/le constrains the *response* too, not just request inputs - if a
+    # future model swap ever returned something out of [0, 1] (a raw logit,
+    # say), Pydantic rejects the response itself with a loud 500 instead of
+    # silently handing a caller a nonsensical confidence value.
+    confidence: float = Field(..., ge=0.0, le=1.0)
+    probabilities: dict[str, float]
+    latency_ms: float
+    model_version: str
+
+
+# ── Model: architecture + loading ────────────────────────────────────
 
 class RecurrentClassifier(nn.Module):
     """Embedding -> LSTM -> dropout -> logits. Same architecture as train_rnn.py's
@@ -119,34 +159,7 @@ except (OSError, FileNotFoundError) as exc:
     )
 
 
-class PredictRequest(BaseModel):
-    text: str = Field(..., min_length=1, max_length=MAX_TEXT_LENGTH)
-
-    @field_validator("text")
-    @classmethod
-    def not_blank(cls, value: str) -> str:
-        # min_length=1 only catches a literally empty string; "   " gets past
-        # that but is blank in every way that matters.
-        if not value.strip():
-            raise ValueError("text must not be blank")
-        return value
-
-
-class PredictResponse(BaseModel):
-    sentiment: str
-    confidence: float
-    probabilities: dict[str, float]
-    latency_ms: float
-
-
-@app.get("/health")
-def health() -> dict:
-    return {
-        "status": "ok" if _model is not None else "model_not_loaded",
-        "model": MODEL_NAME,
-        "model_path": str(MODEL_PATH),
-    }
-
+# ── Text -> numbers ───────────────────────────────────────────────────
 
 def _encode(text: str) -> tuple[torch.Tensor, torch.Tensor]:
     """Text -> a single padded id sequence and its real (non-padding) length.
@@ -163,17 +176,31 @@ def _encode(text: str) -> tuple[torch.Tensor, torch.Tensor]:
     return torch.from_numpy(encoded), torch.tensor([length])
 
 
+# ── Endpoints ─────────────────────────────────────────────────────────
+
+@app.get("/health")
+def health() -> dict:
+    return {
+        "status": "ok" if _model is not None else "model_not_loaded",
+        "model": MODEL_NAME,
+        "model_version": MODEL_VERSION,
+        "model_path": str(MODEL_PATH),
+    }
+
+
 @app.post("/predict", response_model=PredictResponse)
 def predict(request: PredictRequest) -> PredictResponse:
     if _model is None or _vocab is None:
         raise HTTPException(status_code=503, detail="Model not loaded - run `dvc repro train_rnn` first")
 
     start = time.perf_counter()
+
+    # Step 1: clean the text the same way training data was cleaned.
     cleaned = clean_text(request.text)
     if not cleaned.strip():
         # Punctuation/numbers/placeholder-only text cleans down to nothing -
         # the same empty-document case build_features() drops during
-        # training (Decisions §1). Reject it here too instead of scoring
+        # training (decisions.md §1). Reject it here too instead of scoring
         # against an empty string.
         raise HTTPException(
             status_code=422,
@@ -181,6 +208,7 @@ def predict(request: PredictRequest) -> PredictResponse:
             "or placeholder content) - nothing left to score.",
         )
 
+    # Step 2: text -> ids -> the model -> a probability per class.
     inputs, lengths = _encode(cleaned)
     with torch.no_grad():
         logits = _model(inputs, lengths)[0]
@@ -189,9 +217,11 @@ def predict(request: PredictRequest) -> PredictResponse:
     best_idx = int(logits.argmax())
     latency_ms = (time.perf_counter() - start) * 1000
 
+    # Step 3: package the response.
     return PredictResponse(
         sentiment=ID2LABEL[best_idx],
         confidence=float(proba[best_idx]),
         probabilities=probabilities,
         latency_ms=round(latency_ms, 2),
+        model_version=MODEL_VERSION,
     )

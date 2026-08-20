@@ -12,7 +12,7 @@ gives the **context**, the **decision**, the **rationale**, and the
 |---|---|---|
 | [1](#1-text-cleaning--tokenization) | Clean text with plain regex: lowercase, expand contractions, strip placeholder text, attach negation to the next word | No extra dependencies; keeps negation ("not good") from being lost |
 | [2](#2-combine-positive--negative-into-full_review) | Merge the positive and negative review fields into one document | One sentiment label per review needs one text field |
-| [3](#3-sentiment-labeling--scheme-a) | Label sentiment by score: `<6` NEGATIVE, `6–8` NEUTRAL, `≥8` POSITIVE | This cutoff gives the least-imbalanced class split of the options tried |
+| [3](#3-sentiment-labeling--vader-on-review-text-binary-v15) | Label sentiment with VADER on the review text itself, binary NEGATIVE/POSITIVE | The old score-based labels sometimes disagreed with what the review actually said; text-derived labels don't |
 | [4](#4-tf-idf-over-embeddings) | Use TF-IDF features, not embeddings, for the first model | Fast, cheap, and easy to explain - the right starting point |
 | [5](#5-fit-on-train-only--stratified-split) | Split the data before fitting TF-IDF, and fit on the train split only | Prevents test-data leakage into the features |
 | [6](#6-feature-store--sqlite) | Store features in SQLite, not MySQL | No server needed; zero setup |
@@ -22,16 +22,16 @@ gives the **context**, the **decision**, the **rationale**, and the
 | [10](#10-contraction-expansion--negation-attachment-v11) | Expand contractions, then attach negation words to the next word | Keeps "not good" from splitting into two unrelated, unhelpful tokens |
 | [11](#11-de-duplicate-before-cleaning-v11) | Remove duplicate reviews before cleaning | Saves time and stops duplicates from skewing the classes |
 | [12](#12-cleaning-defects-detected-in-code-v11) | Added a script that scans for known cleaning bugs and reports counts | Turns "is the fix still working?" into a number, not a guess |
-| [13](#13-baseline-model--linear-classifier-on-tf-idf-v12) | Default model is a class-weighted LogisticRegression | Catches more NEGATIVE reviews than the alternative, and gives real confidence scores |
+| [13](#13-baseline-model--linear-classifier-on-tf-idf-v12-retrained-v15) | Default model is a LogisticRegression (`class_weight="balanced"`); a calibrated LinearSVC is the alternative | `logreg` macro-F1 0.8358, `linear_svc` 0.8652 on the current binary data |
 | [14](#14-headline-metric--macro-f1-not-accuracy-v12) | Report macro-F1, not accuracy, as the main score | Accuracy can look good while ignoring the smallest class; macro-F1 can't |
-| [15](#15-transformer-fine-tune-as-a-pipeline-stage-v12) | Fine-tune a small pretrained model (BERT-mini) as a second, stronger model | Can see word order, unlike TF-IDF; built after the simple baseline existed |
+| [15](#15-transformer-fine-tune-as-a-pipeline-stage-v12-retrained-v15) | Fine-tune a small pretrained model (now BERT-tiny, v1.5) as a fourth model | distilbert-base-uncased was tried first but too slow on CPU (~20h/epoch) |
 | [16](#16-mlflow-for-experiment-tracking-v12) | Log every run's settings, scores, and library versions to MLflow | Makes any past run reproducible from its own record |
-| [17](#17-class-imbalance--cost-sensitive-loss-not-resampling-v12) | Weight the rare classes more heavily during training, for all three model families | Same effect as duplicating rare rows, without the extra time or data |
+| [17](#17-class-imbalance--cost-sensitive-loss-not-resampling-v12) | Weight the rare class more heavily during training, for all 4 models | NEGATIVE recall across the four ranges 0.70-0.93, `logreg` included |
 | [18](#18-engineering-grade-run-records-v12) | Standardize what every run logs, so runs can be compared fairly | A comparison is only as good as its weakest, most incomplete entry |
 | [19](#19-three-training-stages-correctly-named-v12) | Gave every model its own pipeline stage and an accurate artifact name | A model behind a manual flag, or a wrongly named folder, is easy to miss or misread |
 | [20](#20-a-recurrent-model-as-a-third-baseline-v12) | Added an RNN/LSTM trained from scratch as a third model | Sits between the simple baseline and the transformer - learns word order, no pretraining |
-| [21](#21-tuning-experiments--kept-vs-reverted-v12--v13--v14) | Kept a running log of every parameter change tried, and whether it was kept | Stops the same dead end from being tried again by accident |
-| [22](#22-serving-rnn_lstm-the-highest-scoring-model-on-current-data-v14) | The API serves `rnn_lstm`, the model with the best macro-F1 on current data | A data-cleaning fix flipped the ranking from `bert_mini`; serving follows the metric this project has used throughout (Decision 14) |
+| [21](#21-tuning-experiments--kept-vs-reverted-v12--v13--v14--v15) | Kept a running log of every parameter change tried, and whether it was kept | Stops the same dead end from being tried again by accident |
+| [22](#22-serving-rnn_lstm-the-highest-scoring-model-on-current-data-v14-re-confirmed-v15) | The API serves `rnn_lstm`, the model with the best macro-F1 (re-confirmed after full retrain, v1.5) | Wins by a clear margin (0.8918 vs. next-best 0.8652) on the metric this project has used throughout |
 | [23](#23-a-plain-html-page-over-the-api-not-a-framework-app-v14) | A single plain HTML/CSS/JS page (`ui/index.html`), no framework, calls the API | The whole page is one form and one API call - too simple to need framework overhead |
 
 ---
@@ -73,21 +73,43 @@ as unnecessary for a first baseline.
 **Rationale.** One document per review is the natural unit for a single
 per-review sentiment label and a single TF-IDF vector.
 
-## 3. Sentiment labeling — Scheme A
+## 3. Sentiment labeling — VADER on review text, binary (v1.5)
 
 **Context.** The dataset has a numeric `Reviewer_Score` (2.5–10.0) but no
-explicit sentiment label.
+explicit sentiment label. This project used that score for labeling
+through v1.4 (a 3-class Scheme A: `NEGATIVE < 6`, `6 ≤ NEUTRAL < 8`,
+`POSITIVE ≥ 8`, ~10/25/65 split). Manually checking reviews near that
+boundary found real cases where the score and the review text disagreed -
+a review reading "staff rude unhelpful money grabbers" still scored 8.8/10.
 
-**Decision.** Derive a 3-class label by thresholding the score (**Scheme A**):
-`NEGATIVE < 6`, `6 ≤ NEUTRAL < 8`, `POSITIVE ≥ 8` (`features/build_features.py`).
+**Decision.** Sentiment now comes from **VADER** (a lexicon-based sentiment
+scorer) run directly on `full_review`, not from `Reviewer_Score`. Binary,
+not 3-class: `compound >= 0.0` -> POSITIVE, else NEGATIVE
+(`features/build_features.py`, `vaderSentiment` package). Produces a
+86.5% / 13.5% POSITIVE/NEGATIVE split (435,283 / 68,163 rows). The old
+Scheme A code is kept, commented out, not deleted.
 
-**Rationale.** Produces the least-imbalanced split observed (~10% / 25% / 65%),
-leaving a large-enough NEGATIVE class to learn.
+**Rationale.** Labeling from the review text itself, not a separate
+numeric rating, removes the score-vs-text disagreement case above by
+construction - the label now describes what the text actually says. The
+`0.0` cutoff is VADER's own built-in zero-point (net-positive vs
+net-negative lexicon weight), not a number picked to hit a target balance.
+A mathematically closer-to-50/50 cutoff (0.70) was tried and rejected for
+the same reason Scheme A's alternatives were: manually checking reviews
+near it found genuinely positive text ("very helpful polite staff") that
+cutoff would have called NEGATIVE.
 
-**Alternatives.** Schemes B/C (higher cutoffs) left <5% negatives — too few to
-train a usable NEGATIVE class. Thresholds are single-source constants, so a
-future scheme is a one-line change (bump the artifact version — see
-[Versioning](../versioning.md)).
+**Alternatives.** Reassigning `Reviewer_Score`'s old NEUTRAL band into a
+binary split via a new score cutoff was considered first; VADER was chosen
+instead specifically because it addresses the score-vs-text disagreement
+problem that motivated this change in the first place, which a different
+score cutoff alone would not. NLTK's own copy of VADER was considered
+over the standalone `vaderSentiment` package - not used, since NLTK's
+version needs a separate `nltk.download('vader_lexicon')` call at runtime,
+a reproducibility risk this project avoids elsewhere (§16). This is a
+genuine labeling-contract change - see [Versioning](../versioning.md)'s
+naming convention for why it's treated differently from the earlier
+Scheme A tuning experiments (§21) that didn't change the contract.
 
 ## 4. TF-IDF over embeddings
 
@@ -206,19 +228,26 @@ guess. It actually found something the manual checks missed: 48 reviews that
 were only placeholder text and cleaned down to nothing. Those get dropped in
 `build_features()` now.
 
-## 13. Baseline model — linear classifier on TF-IDF (v1.2)
+## 13. Baseline model — linear classifier on TF-IDF (v1.2, retrained v1.5)
 
 **Context.** Needed a first, simple model to measure everything else against.
 
-**Decision.** `training/train_linear.py` trains a class-weighted
-LogisticRegression by default (`model_store/logreg_v1.pkl`). A class-weighted
-LinearSVC is also available via `--model linear_svc`.
+**Decision.** `training/train_linear.py` trains a LogisticRegression by
+default (`model_store/logreg_v1.pkl`), with `class_weight="balanced"`. A
+calibrated LinearSVC is also available via `--model linear_svc`. Briefly
+changed (v1.5): `logreg` dropped `class_weight="balanced"` at the user's
+explicit request, matching another branch's unweighted config; measuring
+the effect (§17, §21) showed it cost NEGATIVE recall without a compensating
+gain, so it was restored to weighted later the same version.
 
-**Rationale.** LogisticRegression scores higher on macro-F1 (0.625 vs 0.605)
-and catches far more NEGATIVE reviews (0.712 vs 0.469 recall), so it's the
-default. `linear_svc` here is the calibrated version added in v1.4 (§21) -
-calibration traded recall for higher accuracy (0.736 vs 0.690), the same
-macro-F1-vs-accuracy tradeoff this project keeps measuring (§14).
+**Rationale.** On the current binary, VADER-labeled data: `logreg` scores
+macro-F1 0.8358 / accuracy 0.9073; `linear_svc` (calibrated) scores 0.8652 /
+0.9412. Both are far higher than any 3-class result this project measured
+before - binary classification is a simpler task, and labels derived from
+the review text itself correlate more directly with a text-based model's
+own features than a separate numeric score did (§3). `logreg` scores lower
+than `linear_svc` on macro-F1 here specifically because of the weighting
+tradeoff measured in §17 - it isn't a weaker model overall.
 
 **Alternatives.** Naive Bayes was too weak to use. Tree models don't suit
 this much sparse text. The transformer came later, once this baseline
@@ -226,37 +255,51 @@ existed (§15).
 
 ## 14. Headline metric — macro-F1, not accuracy (v1.2)
 
-**Context.** The classes are imbalanced (~10/25/65), so accuracy alone can
-look good while mostly ignoring the small classes.
+**Context.** The classes are imbalanced - originally ~10/25/65 across three
+classes; now (v1.5, binary VADER labels, §3) ~13.5/86.5 across two - so
+accuracy alone can look good while mostly ignoring the small class either way.
 
-**Decision.** Macro-F1 (an equal-weighted average across all three classes)
-is the main score. Accuracy and weighted-F1 are still recorded, just not the
+**Decision.** Macro-F1 (an equal-weighted average across classes) is the
+main score. Accuracy and weighted-F1 are still recorded, just not the
 target.
 
 **Rationale.** Macro-F1 can't be inflated by doing well only on the largest
 class - a gain on the small NEGATIVE class actually shows up in the number.
+This kept mattering after the move to binary labels: `rnn_lstm` pulls ahead
+of all three other models specifically on NEGATIVE-class handling (§22).
 
 **Alternatives.** Accuracy and weighted-F1 both hide poor performance on the
-small classes. ROC-AUC is tracked too (§18) but isn't the headline.
+small class. ROC-AUC is tracked too (§18) but isn't the headline.
 
-## 15. Transformer fine-tune as a pipeline stage (v1.2)
+## 15. Transformer fine-tune as a pipeline stage (v1.2, retrained v1.5)
 
 **Context.** TF-IDF can't see word order or context. A pretrained language
 model can - this was built after the simpler baseline existed (§13), not
 instead of it.
 
-**Decision.** `training/train_transformer.py` fine-tunes BERT-mini on the
-same data splits as everything else, saving to `model_store/bert_mini_v1/`.
+**Decision.** `training/train_transformer.py` fine-tunes a small pretrained
+encoder on the same data splits as everything else. The checkpoint changed
+twice in v1.5: `bert-mini` -> `distilbert-base-uncased` (matching another
+branch's choice, at the user's request) -> `google/bert_uncased_L-2_H-128_A-2`
+("BERT-tiny", 2 layers, hidden 128, ~4.4M params - smaller than bert-mini),
+saved to `model_store/bert_tiny_v1/`.
 
-**Rationale.** Using the same splits and scoring keeps its macro-F1 directly
-comparable to the baseline's. BERT-mini (not a larger model) trades a little
-quality for much less time and size - the right call for a dataset this size.
+**Rationale.** `distilbert-base-uncased` (~66M params) turned out
+impractical on this CPU-only setup: a smoke test extrapolated to roughly
+20+ hours for a single epoch on the full ~400k-row dataset, versus
+`bert-mini`'s 1.5-3 hours. Swapping to BERT-tiny cut that to well under an
+hour (confirmed: full run finished in ~41 minutes) while still being a
+genuinely different, smaller-than-bert-mini transformer checkpoint. Using
+the same splits and scoring keeps its macro-F1 directly comparable to the
+other three models (§21's tuning table has the full distilbert timing
+experiment).
 
-**Known limitation.** The text going in is cleaned and simplified
-(lowercased, negation words glued together), not the natural writing this
-model was originally trained on, so it likely understates what the model
-could do with less-processed text. Raw text was tried instead and didn't
-help (§21).
+**Known limitation.** BERT-tiny scored the lowest macro-F1 of the four
+models (0.8519) despite having the *highest* ROC-AUC (0.9704, §22) - a real,
+sensible split: ROC-AUC measures ranking quality regardless of threshold,
+while macro-F1 measures classification quality at the threshold actually
+used. A 2-layer, 1-epoch model this small is likely underfit at the
+decision boundary even though its relative confidence ranking is good.
 
 **Alternatives.** Frozen sentence embeddings are cheaper but usually score
 below a full fine-tune. A hosted third-party API was ruled out: not open
@@ -288,27 +331,32 @@ project is meant to run fully offline.
 
 ## 17. Class imbalance — cost-sensitive loss, not resampling (v1.2)
 
-**Context.** NEGATIVE reviews are only ~10% of the data, so a model left to
-its own devices tends to mostly ignore that class.
+**Context.** NEGATIVE reviews are a small minority of the data - ~13.5%
+under the current binary VADER labels (§3) - so a model left to its own
+devices tends to mostly ignore that class.
 
-**Decision.** All three model families weight the rare classes more heavily
-during training: the linear models via `class_weight="balanced"`, the RNN
+**Decision.** All four models weight the rare class more heavily during
+training: `logreg` and `linear_svc` via `class_weight="balanced"`, the RNN
 via a weighted `CrossEntropyLoss`, and the transformer via a custom
-`WeightedTrainer` that overrides `compute_loss` the same way (added v1.2 -
-HuggingFace's stock `Trainer` doesn't support this out of the box).
+`WeightedTrainer` that overrides `compute_loss` (HuggingFace's stock
+`Trainer` doesn't support this out of the box). Briefly changed (v1.5):
+`logreg` dropped this weighting, at the user's explicit request, matching
+another branch's config - the measurement below is what that experiment
+found, and why it was reverted (§21).
 
-**Rationale.** It works: NEGATIVE recall is 0.732, well above what an
-unweighted model would get on a class this small.
+**Rationale.** The effect is large and directly measurable. With weighting,
+NEGATIVE recall is 0.9140 (`logreg`), 0.7026 (`linear_svc`), 0.8812
+(`bert_tiny`), and 0.9324 (`rnn_lstm`) - `rnn_lstm` catches 93% of NEGATIVE
+reviews on the same data. Dropping `logreg`'s weighting (tried, then
+reverted, v1.5) cut its NEGATIVE recall to 0.6698 - confirming the same
+pattern the other three models already showed. The tradeoff is precision:
+`logreg`'s NEGATIVE precision (0.604) is the lowest of the four weighted
+models, since weighting trades some false positives for far fewer missed
+NEGATIVE reviews.
 
 **Alternatives.** Duplicating rare rows (oversampling) has the same effect
 but is slower. Removing common rows would throw away real data. SMOTE
 doesn't suit this kind of high-dimensional sparse text data.
-
-**Known limitation.** Imbalance isn't actually the main bottleneck. NEUTRAL
-is 25% of the data and still performs worst (F1 0.479), because the score
-cutoff that defines it (§3) is somewhat arbitrary - a 7.9 and an 8.1 read
-almost identically but land in different classes. That's label noise, which
-reweighting can't fix.
 
 ## 18. Engineering-grade run records (v1.2)
 
@@ -360,7 +408,7 @@ matrix for no reason.
 publish wheels for the Python version this project runs on, and PyTorch was
 already a dependency for the transformer stage.
 
-## 21. Tuning experiments — kept vs. reverted (v1.2 / v1.3 / v1.4)
+## 21. Tuning experiments — kept vs. reverted (v1.2 / v1.3 / v1.4 / v1.5)
 
 **Context.** Every row below is a real, measured experiment judged by
 macro-F1 (§14), not a guess, so a dropped idea doesn't get tried again by
@@ -375,32 +423,58 @@ accident.
 | Sentiment thresholds | Scheme A (`<6`/`6–8`/`≥8`) → NPS-style (`<7`/`7–9`/`≥9`) | Macro-F1 improved on every model | Reverted — prioritizes accuracy over macro-F1 as the headline metric, a deliberate call, not a measurement failure | v1.2 |
 | Transformer input text | `clean_review` → raw `full_review` | Macro-F1 0.6461 → 0.6459 — a wash, likely masked by `MAX_LENGTH=64` truncating before the difference could show | Reverted to `clean_review` | v1.2 |
 | `linear_svc` calibration | Wrapped in `CalibratedClassifierCV` (sigmoid, cv=5) to get real `predict_proba` output | Accuracy improved 0.7206 → 0.7356; macro-F1 fell 0.6225 → 0.6049 | Kept the calibrated version in the codebase as a real, measured serving candidate — but not selected for serving (§22), since it trades away macro-F1 | v1.4 |
+| Transformer checkpoint size | `bert-mini` → `distilbert-base-uncased` (~66M params) | Smoke test extrapolated to ~20+ hours for one epoch on the full dataset, on CPU with no GPU available — far past what's workable here | Reverted to a smaller checkpoint — see the next row, not back to bert-mini | v1.5 |
+| Transformer checkpoint size (retry) | `distilbert-base-uncased` → `google/bert_uncased_L-2_H-128_A-2` ("BERT-tiny", ~4.4M params, smaller than bert-mini) | Full run finished in ~41 minutes; macro-F1 0.8519, the lowest of the four current models, but ROC-AUC 0.9704, the *highest* — see §15's known limitation | Kept — the only checkpoint size that was actually practical to train fully here | v1.5 |
+| `logreg` class weighting | Dropped `class_weight="balanced"` (solver `saga`→`lbfgs`), at the user's explicit request, matching another branch's config | NEGATIVE recall fell to 0.6698, well below what the other three weighted models get (0.70-0.93, §17) | Reverted — `class_weight="balanced"` restored once the recall drop was measured | v1.5 |
 
 **How to read a "reverted" row.** It means the code went back to what it was
 before - not that the experiment was wasted. A negative result is still
 worth keeping on record, same idea as §12's cleaning diagnostics.
 
-## 22. Serving `rnn_lstm`, the highest-scoring model on current data (v1.4)
+## 22. Serving `rnn_lstm`, the highest-scoring model on current data (v1.4, re-confirmed v1.5)
 
 **Context.** The API serves one model out of four, picked by macro-F1
-(§14). Which model that is changed partway through the project: a
-data-cleaning bug fix (§10-12) shifted the ranking, described below.
+(§14). Both the labeling scheme (§3, now binary VADER) and every model's
+config changed since this decision was first made (v1.4) - re-measured
+after all four retrained on the current data (v1.5) to check whether the
+served-model choice still holds.
 
-**Decision.** `serving/app.py` (FastAPI) serves `rnn_lstm` - it validates
-input (rejects empty, whitespace-only, or junk-only text), loads the model
-once at startup, and returns a prediction with confidence scores and how
-long the request took.
+**Decision.** `serving/app.py` (FastAPI) serves `rnn_lstm` - still the
+answer after retraining. It validates input (rejects empty, whitespace-only,
+or junk-only text), loads the model once at startup, and returns a
+prediction with confidence, per-class probabilities, latency, and which
+model version answered (`model_version`, added v1.5).
 
-**Why `rnn_lstm` and not `bert_mini`.** On an earlier data snapshot, before
-the negation-scope and placeholder-leak bugs were fixed (§10-12), `bert_mini`
-genuinely was the best of the four (macro-F1 0.6685) and was the original
-serving pick. After that data got regenerated with the fixes, the ranking
-flipped: `rnn_lstm`'s kept 3-epoch configuration (chosen and re-verified in
-§21) now scores 0.6488 against `bert_mini`'s 0.6461 on the same, current
-data - a small but real, repeatable gap, not noise (§21 confirms the RNN
-result reproduces identically across separate runs). Since this project
-picks the served model by macro-F1 on the data it actually ships with, the
-serving choice was updated to match.
+**The final four-way comparison, on the current binary VADER-labeled data:**
+
+| Model | macro-F1 | accuracy | ROC-AUC |
+|---|---|---|---|
+| **`rnn_lstm`** | **0.8918** | 0.9434 | — |
+| `linear_svc` (calibrated) | 0.8652 | 0.9412 | 0.9671 |
+| `bert_tiny` | 0.8519 | 0.9208 | 0.9704 |
+| `logreg` | 0.8358 | 0.9073 | 0.9690 |
+
+`rnn_lstm` wins on macro-F1 - the metric this project has used throughout
+(§14) - by a clear margin over the next-best model (0.8918 vs 0.8652), not
+a close call. This is a different picture from the older, closer 3-class
+result (§13/§17), where the gap between models was smaller: on the binary,
+text-derived labels, `rnn_lstm`'s ability to read word order pulls further
+ahead, especially on NEGATIVE-class recall (0.9324, vs 0.70-0.91 for the
+other three, §17).
+
+**Why not the others.** `linear_svc` scores higher on plain accuracy
+(94.12%) than `rnn_lstm` at first glance, but the two are close enough
+(94.12% vs 94.34%) that this isn't actually the deciding factor here -
+`rnn_lstm` wins on both accuracy *and* macro-F1 this time, unlike the
+closer tradeoffs measured elsewhere in this project (§21). `bert_tiny` has
+the *highest* ROC-AUC (0.9704) but not the highest macro-F1 - a real,
+explained split (§15's known limitation), not a contradiction; it just
+isn't the best classifier at the threshold actually used, even though its
+relative confidence ranking is good. `logreg` scores the lowest macro-F1 of
+the four despite being weighted the same way as the others (§17) - its
+NEGATIVE recall (0.9140) is close to `rnn_lstm`'s, but that comes at the
+cost of the lowest NEGATIVE precision of the four (0.604), pulling its
+macro-F1 down.
 
 **Docker packaging.** The root `Dockerfile` builds the API into a single
 container: a `python:3.12-slim` base, a scoped `serving/requirements.txt`
@@ -408,30 +482,32 @@ instead of the full project one (no `dvc`, `mlflow`, or `scikit-learn` -
 `rnn_lstm` doesn't need them to serve), and only the files the API actually
 uses copied in (`serving/`, `features/build_features.py` for `clean_text()`,
 and the trained RNN's weights and vocabulary file). `rnn_lstm` doesn't need
-`transformers` either, unlike `bert_mini` would have - just `torch` and a
-small JSON vocabulary. Anyone with Docker can run the API the same way,
-without setting up a matching Python environment by hand.
+`transformers` either - just `torch` and a small JSON vocabulary. Anyone
+with Docker can run the API the same way, without setting up a matching
+Python environment by hand.
 
-**Rationale.** `linear_svc` actually scores higher on plain accuracy
-(73.56% vs `rnn_lstm`'s 70.60%), but accuracy rewards guessing the majority
-class, which is exactly why this project uses macro-F1 instead (§14) -
-serving a different model just because it wins on a different metric would
-contradict that choice. The cost: `rnn_lstm` is slower to respond than a
-linear model (~14.5ms vs `logreg`'s ~3ms per request), but noticeably
-cheaper than serving `bert_mini` would have been (~22ms, plus the
-`transformers` dependency).
+**Response contract hardening (v1.5).** Two additions, prompted by comparing
+against a reference implementation covering similar serving material with a
+different (churn prediction) example: `model_version` is now returned on
+every response, so a caller can tell two deployments apart without reading
+server logs; and
+`confidence` is now constrained with `Field(..., ge=0.0, le=1.0)` on the
+*response* itself, not just request inputs - if a future model swap ever
+returned something outside that range, Pydantic would reject the response
+with a loud `500` instead of silently handing a caller a nonsensical value.
 
 **Calibration experiment on `linear_svc`.** Before this, `linear_svc` was
 tested as a middle ground. Giving it real confidence scores (via
 `CalibratedClassifierCV`) raised its accuracy further but lowered its
-macro-F1 (§21) - the same tradeoff again, which ruled it out.
+macro-F1 relative to an uncalibrated baseline (§21) - the same
+accuracy-vs-macro-F1 tradeoff this project keeps measuring, though on the
+current binary data it's no longer the deciding factor against `rnn_lstm`.
 
-**Alternatives.** `logreg` was the original pick (fastest) but scores lowest
-of the four on macro-F1. `bert_mini` was the pick until the data fix above
-changed the ranking - it's still the second-best on macro-F1, and would be
-worth revisiting if the ranking ever flips back on a future data update. A
-version of the API that lets callers pick any of the four models was
-considered and rejected as unnecessary complexity for a first version.
+**Alternatives.** `bert_tiny` was tried as the served model's counterpart
+question (is the transformer worth the dependency weight) and lost on
+macro-F1 despite winning on ROC-AUC, as explained above. A version of the
+API that lets callers pick any of the four models was considered and
+rejected as unnecessary complexity for a first version.
 
 ## 23. A plain HTML page over the API, not a framework app (v1.4)
 

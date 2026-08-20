@@ -79,7 +79,7 @@ ui/index.html   (run separately, e.g. python -m http.server 8090)
 | `vectorize`      | `feature_store.db`, `vectorize.py`                        | `data/processed/train_v1.csv`, `test_v1.csv`, `tfidf_vectorizer_v1.pkl` |
 | `train` / `train_linear_svc` | both splits, `tfidf_vectorizer_v1.pkl`, `train_linear.py`, `tracking.py` | a trained model + its scores |
 | `train_rnn`      | both splits, `train_rnn.py`, `tracking.py`                | `rnn_lstm_v1.pt` + its vocabulary file + scores               |
-| `train_transformer` | both splits, `train_transformer.py`, `tracking.py`     | `bert_mini_v1/` + scores                        |
+| `train_transformer` | both splits, `train_transformer.py`, `tracking.py`     | `bert_tiny_v1/` + scores                        |
 
 ## Tech stack
 
@@ -89,7 +89,7 @@ ui/index.html   (run separately, e.g. python -m http.server 8090)
 - **DVC** — runs the pipeline steps in order and keeps the data files
   versioned alongside the code.
 - **PyTorch** — trains the RNN model from scratch.
-- **transformers** (HuggingFace) — fine-tunes the pretrained BERT-mini model.
+- **transformers** (HuggingFace) — fine-tunes the pretrained BERT-tiny model.
 - **MLflow** — logs every run's settings and scores so past results aren't lost.
 - **FastAPI** — what the API is built with.
 

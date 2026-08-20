@@ -99,7 +99,7 @@ stages:
       - feature_store/feature_store.py
       - validation/feature_column.json
     outs:
-      - model_store/bert_mini_v1
+      - model_store/bert_tiny_v1
     metrics:
       - training/metrics_transformer.json:
           cache: false

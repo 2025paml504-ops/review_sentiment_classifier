@@ -23,7 +23,7 @@ data/processed/train_v1.csv + test_v1.csv  +  model_store/tfidf_vectorizer_v1.pk
         ├─ train              → model_store/logreg_v1.pkl          + training/metrics_logreg.json
         ├─ train_linear_svc   → model_store/linear_svc_v1.pkl      + training/metrics_linear_svc.json
         ├─ train_rnn          → model_store/rnn_lstm_v1.pt         + training/metrics_rnn_lstm.json
-        └─ train_transformer  → model_store/bert_mini_v1/          + training/metrics_transformer.json
+        └─ train_transformer  → model_store/bert_tiny_v1/          + training/metrics_transformer.json
 
 all four training stages ──▶ training/tracking.py ──▶ mlflow.db + mlruns/
 ```
@@ -75,8 +75,10 @@ all four training stages ──▶ training/tracking.py ──▶ mlflow.db + ml
    from the train split and trains an Embedding + LSTM stack in PyTorch.
 
 7. **Train transformer** — `python -m training.train_transformer`
-   Fine-tunes a pretrained BERT-mini encoder on the same splits, so its
-   macro-F1 is directly comparable to the other three.
+   Fine-tunes a pretrained BERT-tiny encoder on the same splits, so its
+   macro-F1 is directly comparable to the other three (see
+   [Decisions §15](design/decisions.md) for why BERT-tiny, not a larger
+   checkpoint).
 
 None of this trains a server - the four steps above only produce files under
 `model_store/`. Once step 6 (`train_rnn`) has run, `model_store/rnn_lstm_v1.pt`

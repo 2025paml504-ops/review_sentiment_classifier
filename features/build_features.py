@@ -6,6 +6,7 @@ from pathlib import Path
 
 import numpy as np
 import pandas as pd
+from vaderSentiment.vaderSentiment import SentimentIntensityAnalyzer
 
 # Repo root is two levels up from this file (features/build_features.py).
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -103,9 +104,9 @@ def _expand_nt(match: re.Match) -> str:
         return " not"
     return f"{text[:-2]} not"
 
-# Sentiment label thresholds on Reviewer_Score (Scheme A): NEG < 6, 6 <= NEU < 8, POS >= 8.
-# Produced a 10.3 / 24.9 / 64.8 split; picked by hand to be "the least imbalanced
-# observed", not from an external convention.
+# Historical (3-class Scheme A, superseded v1.4 - see below): NEG < 6,
+# 6 <= NEU < 8, POS >= 8. Produced a 10.3 / 24.9 / 64.8 split; picked by hand
+# to be "the least imbalanced observed", not from an external convention.
 # Also tried NPS-style thresholds (v1.2): Promoter 9-10 / Passive 7-8 /
 # Detractor 0-6. This raised macro-F1 and NEGATIVE/NEUTRAL detection across
 # all four models (logreg went 0.618 -> 0.647), but lowered raw accuracy on
@@ -115,9 +116,34 @@ def _expand_nt(match: re.Match) -> str:
 # to read higher here.
 # SENTIMENT_NEUTRAL_FLOOR = 7.0
 # SENTIMENT_POSITIVE_FLOOR = 9.0
-SENTIMENT_NEUTRAL_FLOOR = 6.0
-SENTIMENT_POSITIVE_FLOOR = 8.0
-SENTIMENT_LABELS = ["NEGATIVE", "NEUTRAL", "POSITIVE"]
+
+# Changed (v1.4): collapsed to binary POSITIVE/NEGATIVE, at the user's
+# explicit request. One cutoff instead of two - kept the existing POSITIVE
+# floor (8.0) unchanged rather than picking a new one, so "POSITIVE" still
+# means exactly what it always has in this project (a genuinely good
+# review); the old NEGATIVE and NEUTRAL bands just merge into one NEGATIVE
+# class. Produces a 64.7 / 35.3 split. The mathematically closest-to-50/50
+# cutoff (8.9) was considered and rejected - it would label a 7.5-scored
+# review NEGATIVE, which no real user would agree with.
+#
+# Commented out, not deleted (v1.4): superseded by the VADER-based labeling
+# below, at the user's explicit request, after manually spot-checking
+# examples near this cutoff and finding real score-vs-text disagreement
+# (e.g. a review reading "staff rude unhelpful money grabbers..." scored
+# 8.8, which this scheme would have called POSITIVE).
+# SENTIMENT_POSITIVE_FLOOR = 8.0
+# SENTIMENT_LABELS = ["NEGATIVE", "POSITIVE"]
+
+# Added (v1.4): sentiment is now derived from the review text itself
+# (full_review, via VADER) rather than thresholding Reviewer_Score. This is
+# a genuine labeling-methodology change, not an implementation tweak - see
+# versioning.md's naming convention: this is exactly the kind of change
+# that bumps the data contract to _v2, unlike v1.1's cleaning-only change.
+SENTIMENT_LABELS = ["NEGATIVE", "POSITIVE"]
+# VADER's compound score ranges -1 to +1; 0 is the natural positive/negative
+# split point (net-positive vs net-negative lexicon weight), matching the
+# same "one cutoff, binary" shape as the scheme it replaces.
+VADER_COMPOUND_FLOOR = 0.0
 
 # Metadata columns that carry no signal for sentiment classification.
 COLUMNS_TO_DROP = [
@@ -255,15 +281,31 @@ def clean_and_tokenize(df: pd.DataFrame) -> pd.DataFrame:
     df["tokens"] = df["clean_review"].map(lambda t: json.dumps(tokenize(t)))
     return df
 
+# Commented out, not deleted (v1.4): superseded by the VADER-based version
+# below, at the user's explicit request.
+# def label_sentiment(df: pd.DataFrame) -> pd.DataFrame:
+#     """Add a `sentiment` label derived from Reviewer_Score (binary: NEGATIVE < 8, POSITIVE >= 8)."""
+#     df = df.copy()
+#     df["sentiment"] = pd.cut(
+#         df["Reviewer_Score"],
+#         bins=[-np.inf, SENTIMENT_POSITIVE_FLOOR, np.inf],
+#         labels=SENTIMENT_LABELS,
+#         right=False,
+#     ).astype(str)
+#     return df
+
+# Added (v1.4): VADER scores full_review directly - the raw, uncleaned text,
+# not clean_review - because VADER's own heuristics (capitalization,
+# punctuation, degree words like "extremely") only work on natural text;
+# feeding it lowercased, punctuation-stripped text would blind it to signal
+# it's specifically designed to use.
+_VADER = SentimentIntensityAnalyzer()
+
 def label_sentiment(df: pd.DataFrame) -> pd.DataFrame:
-    """Add a `sentiment` label derived from Reviewer_Score (Scheme A thresholds)."""
+    """Add a `sentiment` label from VADER's compound score on full_review (binary)."""
     df = df.copy()
-    df["sentiment"] = pd.cut(
-        df["Reviewer_Score"],
-        bins=[-np.inf, SENTIMENT_NEUTRAL_FLOOR, SENTIMENT_POSITIVE_FLOOR, np.inf],
-        labels=SENTIMENT_LABELS,
-        right=False,
-    ).astype(str)
+    compound = df["full_review"].fillna("").map(lambda t: _VADER.polarity_scores(t)["compound"])
+    df["sentiment"] = np.where(compound >= VADER_COMPOUND_FLOOR, "POSITIVE", "NEGATIVE")
     return df
 
 def build_features(path=RAW_DATA_PATH) -> pd.DataFrame:
