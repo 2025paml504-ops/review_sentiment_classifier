@@ -65,10 +65,14 @@ model_store/rnn_lstm_v1.pt + rnn_lstm_v1_vocab.json
     │  serving/app.py   (uvicorn serving.app:app, or the Dockerfile)
     ▼
 REST API on :8000  (/health, /predict)
-    ▲
-    │  request sent from the browser
-    │
-ui/index.html   (run separately, e.g. python -m http.server 8090)
+    ▲                              │
+    │  request sent from           │  every prediction logged
+    │  the browser                 ▼
+ui/index.html               monitoring/predictions.db  (monitoring/prediction_log.py)
+(run separately, e.g.              │
+python -m http.server 8090)        │  monitoring.baseline / simulate_drift / monitor
+                                    ▼
+                          retraining recommendation (evidence-based, not scheduled)
 ```
 
 | Stage            | Reads                                                      | Writes                                                  |
@@ -80,6 +84,7 @@ ui/index.html   (run separately, e.g. python -m http.server 8090)
 | `train` / `train_linear_svc` | both splits, `tfidf_vectorizer_v1.pkl`, `train_linear.py`, `tracking.py` | a trained model + its scores |
 | `train_rnn`      | both splits, `train_rnn.py`, `tracking.py`                | `rnn_lstm_v1.pt` + its vocabulary file + scores               |
 | `train_transformer` | both splits, `train_transformer.py`, `tracking.py`     | `bert_tiny_v1/` + scores                        |
+| monitoring *(started by hand, not a DVC stage)* | every `/predict` request; the held-out test split (`monitoring/baseline.py`); the hand-labeled drift set (`monitoring/simulate_drift.py`) | `monitoring/predictions.db`, `baseline.json`, `drift_report.json`, and a retraining recommendation |
 
 ## Tech stack
 
