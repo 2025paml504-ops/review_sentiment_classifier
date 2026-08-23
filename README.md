@@ -63,6 +63,7 @@ modern-slang set built to simulate drift:
 .venv/bin/python3 -m monitoring.simulate_drift    # score a hand-labeled, modern-slang review set
 .venv/bin/python3 -m monitoring.monitor --source drift_simulation   # check for drift + a retraining recommendation
 .venv/bin/python3 -m monitoring.monitor --source api                 # same check, against real logged traffic
+.venv/bin/python3 -c "from monitoring import prediction_log; print(prediction_log.read_predictions().to_string())"  # inspect the raw log
 ```
 
 Details, the four retraining-trigger signals, and the measured results:

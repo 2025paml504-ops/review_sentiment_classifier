@@ -23,6 +23,18 @@ true label. `serving/app.py` calls this on every `/predict` request,
 wrapped so a logging failure can never turn a working prediction into a
 failed one.
 
+To inspect the log directly:
+
+```bash
+python -c "from monitoring import prediction_log; print(prediction_log.read_predictions().to_string())"
+```
+
+`read_predictions()` also takes `source=` (`"api"` or `"drift_simulation"`)
+and `limit=` to filter or cap what comes back. Or open
+`monitoring/predictions.db` directly with any SQLite browser (e.g.
+PyCharm's Database tool, or DB Browser for SQLite) - the table is named
+`predictions`.
+
 ## The baseline
 
 Every comparison below needs something to compare against.
