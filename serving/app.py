@@ -235,6 +235,10 @@ def predict(request: PredictRequest) -> PredictResponse:
             model_version=MODEL_VERSION,
             source="api",
         )
+        logger.info(
+            "Logged prediction: %s (%.1f%% confidence) - %r",
+            ID2LABEL[best_idx], 100 * proba[best_idx], cleaned[:60],
+        )
     except Exception:
         logger.exception("Failed to log prediction - continuing anyway")
 
