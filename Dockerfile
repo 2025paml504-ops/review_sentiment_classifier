@@ -1,4 +1,4 @@
-# Serves the sentiment classifier's REST API (M4, added 12-Aug).
+# Serves the sentiment classifier's REST API.
 # Uses serving/requirements.txt instead of the root requirements.txt - it's
 # lean again now that serving uses rnn_lstm (v1.4): no torch/transformers
 # stack the way bert_mini needed, and it still skips mlflow/dvc/kaggle,

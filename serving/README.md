@@ -3,7 +3,7 @@
 REST API for the sentiment classifier. Serves `rnn_lstm` - the highest
 macro-F1 of the four trained models (0.8918, a clear margin over the
 next-best model's 0.8652), and macro-F1 is the metric this whole project
-has used throughout. See [Decisions §22](../docs/design/decisions.md) for
+has used throughout. See [Decisions §7](../docs/design/decisions.md) for
 the full four-way comparison and a calibration experiment on `linear_svc`
 that raised its accuracy but lowered its macro-F1.
 
@@ -21,6 +21,11 @@ docker run -p 8000:8000 review-sentiment-api
 Either way, `model_store/rnn_lstm_v1.pt` and `model_store/rnn_lstm_v1_vocab.json`
 need to already exist. Run `dvc repro train_rnn` first if they don't (see
 [Pipeline](../docs/pipeline.md)).
+
+Once it's running, `http://127.0.0.1:8000/docs` (Swagger UI) or `/redoc`
+gives an interactive, always-accurate view of the request/response
+schema - generated straight from `serving/app.py`'s Pydantic models, not
+hand-written separately.
 
 ## Endpoints
 
@@ -51,7 +56,7 @@ curl -X POST http://127.0.0.1:8000/predict \
 ```
 
 Negation is handled correctly - this is the bug fix from
-[Decisions §10](../docs/design/decisions.md) showing up in a live prediction:
+[Decisions §1](../docs/design/decisions.md) showing up in a live prediction:
 
 ```bash
 curl -X POST http://127.0.0.1:8000/predict \
@@ -66,7 +71,7 @@ curl -X POST http://127.0.0.1:8000/predict \
 |---|---|
 | `{"text": ""}` | `422` — empty string rejected by field validation |
 | `{"text": "   "}` | `422` — whitespace-only rejected by a custom validator |
-| `{"text": "12345 !!! ???"}` | `422` — cleans to an empty document after `clean_text()`, rejected before scoring |
+| `{"text": "12345 !!! ???"}` | `422` — cleans to an empty document after `clean_text()`, rejected before scoring (`"Invalid entry - please write a sentence using words."`) |
 | `{}` (missing field) | `422` — FastAPI/Pydantic's built-in validation |
 | `{"text": 12345}` (wrong type) | `422` — built-in type validation |
 | not valid JSON at all | `422` — built-in JSON parsing error |
@@ -79,7 +84,7 @@ Measured locally (`rnn_lstm`, CPU, sequential requests, no batching):
 serving `logreg` measured ~336 req/s, ~3ms/request - a small
 trained-from-scratch recurrent net costs more than a linear model, which
 is the real price of serving the model this project's own metric actually
-ranks best. See [Decisions §22](../docs/design/decisions.md) for the full
+ranks best. See [Decisions §7](../docs/design/decisions.md) for the full
 four-way comparison and model-choice reasoning.
 
 ## UI
@@ -87,7 +92,7 @@ four-way comparison and model-choice reasoning.
 `ui/index.html` is a small static page over this API - a text box, an
 Analyze button, and a result view with the sentiment badge, a confidence
 percentage, and a probability bar per class. No framework, no build step -
-see [Decisions §23](../docs/design/decisions.md) for why.
+see [Decisions §11](../docs/design/decisions.md) for why.
 
 ```bash
 # serve it on any port other than 8000 (the API's port)

@@ -188,7 +188,7 @@
         const detail = Array.isArray(data.detail)
           ? data.detail.map(d => d.msg).join("; ")
           : data.detail;
-        showError(detail || `Request failed (HTTP ${res.status}).`);
+        showError(friendlyError(detail, res.status) || `Request failed (HTTP ${res.status}).`);
         return;
       }
 
@@ -225,6 +225,25 @@
   function showError(message) {
     errorEl.textContent = message;
     errorEl.classList.add("show");
+  }
+
+  // The API's own error text (serving/app.py) used to be written for a
+  // program reading it, not a person typing into this form - so this
+  // translated the specific ones we knew about. The empty-after-cleaning
+  // case is now worded plainly at the source (serving/app.py) instead, so
+  // it no longer needs translating here; the other two still do, since
+  // they come from FastAPI/Pydantic's own built-in validation messages,
+  // which aren't ours to reword at the source.
+  function friendlyError(detail, status) {
+    if (status === 422 && typeof detail === "string") {
+      if (detail.toLowerCase().includes("must not be blank")) {
+        return "Please type a review before analyzing.";
+      }
+      if (detail.toLowerCase().includes("at most 5000 characters")) {
+        return "That review is too long - please keep it under 5000 characters.";
+      }
+    }
+    return detail;
   }
 
   submitEl.addEventListener("click", analyze);

@@ -72,11 +72,12 @@ suffix hasn't been renamed yet.
 | Version | Change | Impact | [Decisions](design/decisions.md) sections |
 |---|---|---|---|
 | **v1** | Cleaning → Scheme A thresholds → TF-IDF fit on train only | Baseline | §1–9 |
-| **1.1** | Contraction expansion, negation attachment, earlier de-dup, cleaning diagnostics | 504,731 rows | §10–12 |
-| **1.2** | Four training stages + MLflow tracking; negation-scope and placeholder-leak bug fixes; tuning experiments logged; leaderboard export; `pip freeze` per run | New model artifacts; 503,446 rows after dedup fix | §13–20, most of §21 |
-| **1.3** | Leaderboard ranks by best run, not latest; documented `mlruns/`; Reproducibility section added; RNN epochs re-verified | Docs/tooling only | §21 |
-| **1.4** | `linear_svc` calibration experiment; hypothesis/conclusion MLflow tags; served model switched (`logreg` → `bert_mini` → `rnn_lstm`); Docker packaging; UI added | Serving/UI only; no data-contract change | §16, §21–23 |
-| **1.5** | Sentiment relabeled: VADER on `full_review` replaces `Reviewer_Score` thresholding, binary NEGATIVE/POSITIVE (not 3-class); `logreg` de-weighted (`lbfgs`, no `class_weight`); transformer base tried `bert-mini` → `distilbert-base-uncased` (too slow on CPU) → `bert-tiny`; binary ROC-AUC bug fixed in all three trainers; all four models retrained and `rnn_lstm` re-confirmed as the served model; `model_version` + response bounds added to the API | Real data-contract change (`_v2` in spirit, see note above); 68,163 NEGATIVE / 435,283 POSITIVE rows | §3, §13–15, §17, §21–22 |
+| **1.1** | Contraction expansion, negation attachment, earlier de-dup, cleaning diagnostics | 504,731 rows | §1 |
+| **1.2** | Four training stages + MLflow tracking; two cleaning bug fixes; leaderboard export; `pip freeze` per run | New model artifacts; 503,446 rows after dedup fix | §7, §8, §9–18, most of §10 |
+| **1.3** | Leaderboard ranks by best run, not latest; `mlruns/` documented; RNN epochs re-verified | Docs/tooling only | §10 |
+| **1.4** | `linear_svc` calibration; hypothesis/conclusion tags; served model switched to `rnn_lstm`; Docker + UI added | Serving/UI only; no data-contract change | §7, §10, §11 |
+| **1.5** | Sentiment relabeled with VADER, binary NEGATIVE/POSITIVE; `logreg` weighting reverted after testing; transformer switched to `bert-tiny`; ROC-AUC bug fixed; all four models retrained; API response hardened | Real data-contract change (`_v2` in spirit, see note above); 68,163 NEGATIVE / 435,283 POSITIVE rows | §2, §7, §8, §10 |
+| **1.6** | Added `monitoring/`: prediction logging, a training baseline, a drift simulation (macro-F1 0.89 → 0.76), and four retraining-trigger signals | Monitoring/serving only; no data or model-artifact contract change | §12 |
 
 Experiment tracking (MLflow) and reproducibility are covered in
 [Pipeline](pipeline.md#experiment-tracking), not here — this file is DVC's

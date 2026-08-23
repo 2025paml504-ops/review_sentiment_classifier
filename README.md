@@ -32,10 +32,15 @@ Then, to run the API and the UI (needs `rnn_lstm` from the step above):
 .venv/bin/uvicorn serving.app:app --reload --port 8000
 
 # a second terminal
-.venv/bin/python -m http.server 8090 --directory ui
+.venv/bin/python3 -m http.server 8090 --directory ui
 ```
 
 Open `http://localhost:8090/index.html`. Details: [serving/README.md](serving/README.md).
+
+Alongside that, `http://127.0.0.1:8000/docs` (Swagger UI) gives an
+interactive, always-accurate view of the API itself - generated directly
+from `serving/app.py`, useful for testing requests/responses without
+needing `curl` or the UI page.
 
 To see the training side - every run's parameters, metrics, and tags, not
 just the served model - open MLflow's own UI:
@@ -48,6 +53,21 @@ Then open `http://127.0.0.1:5000`. This is a separate thing from the
 sentiment API above: it shows past *training* runs (`logreg`, `linear_svc`,
 `rnn_lstm`, `bert_tiny`, all under the `review_sentiment` experiment), not
 live predictions.
+
+Every prediction the API serves is logged automatically. To check whether
+that traffic still looks like the training data, or a hand-labeled
+modern-slang set built to simulate drift:
+
+```bash
+.venv/bin/python3 -m monitoring.baseline          # record what "normal" looks like (run once, or after any retrain)
+.venv/bin/python3 -m monitoring.simulate_drift    # score a hand-labeled, modern-slang review set
+.venv/bin/python3 -m monitoring.monitor --source drift_simulation   # check for drift + a retraining recommendation
+.venv/bin/python3 -m monitoring.monitor --source api                 # same check, against real logged traffic
+```
+
+Details, the four retraining-trigger signals, and the measured results:
+[Monitoring & retraining](docs/monitoring.md) and
+[Decisions §12](docs/design/decisions.md).
 
 ## Repository layout
 
@@ -64,6 +84,7 @@ live predictions.
 | `mlflow.db`, `mlruns/` | Local MLflow tracking store (git-ignored, regenerable)  |
 | `serving/`       | FastAPI REST API (`/health`, `/predict`) serving `rnn_lstm`; `Dockerfile` at repo root packages it |
 | `ui/`            | Static page (`index.html`) that calls the serving API and shows the result |
+| `monitoring/`    | Prediction logging, drift simulation, and retraining-trigger checks (`prediction_log.py`, `baseline.py`, `simulate_drift.py`, `monitor.py`) |
 
 ## Documentation
 
@@ -78,6 +99,7 @@ this is the deep dive, not required just to run the pipeline).
 - **[Dataset](docs/dataset.md)** — source (Kaggle 515K) and the raw/interim/processed data layers.
 - **[Pipeline](docs/pipeline.md)** — the DVC DAG, each stage in detail, the schema contract, MLflow experiment tracking, and reproducibility (fixed seeds, dataset snapshots, logged parameters).
 - **[Versioning](docs/versioning.md)** — how DVC versions data/artifacts and cutting a new version.
+- **[Monitoring & retraining](docs/monitoring.md)** — prediction logging, the drift simulation and its measured results, and the four retraining-trigger signals.
 - **[Contributing](docs/contributing.md)** — prerequisites, code conventions, common-task recipes, and the pre-commit checklist.
 - **[Design](docs/design/README.md)** — architecture guide and the decision-making guide (why cleaning, sentiment thresholds, TF-IDF, SQLite, DVC, …).
 
@@ -85,11 +107,15 @@ this is the deep dive, not required just to run the pipeline).
 
 Data -> features -> feature store -> TF-IDF -> four trained models
 (`logreg`, `linear_svc`, `rnn_lstm`, `bert_tiny`) -> compared on macro-F1
--> tracked in MLflow. [Decisions §13–20](docs/design/decisions.md) (models)
--> [§21](docs/design/decisions.md) (tuning experiments, kept vs. reverted).
+-> tracked in MLflow. [Decisions §7](docs/design/decisions.md) (models)
+-> [§10](docs/design/decisions.md) (tuning alternatives considered and not adopted).
 
 `serving/` and `ui/` are now both built — see [serving/README.md](serving/README.md)
-and [Decisions §22–23](docs/design/decisions.md).
+and [Decisions §7, §11](docs/design/decisions.md).
+
+Prediction logging, a drift simulation, and retraining-trigger checks are
+also built — see [Monitoring & retraining](docs/monitoring.md) and
+[Decisions §12](docs/design/decisions.md).
 
 ## Model Serving API
 
@@ -111,25 +137,26 @@ and [Decisions §22–23](docs/design/decisions.md).
 | latency_ms | float | How long this request took to score, server-side |
 | model_version | str | Which artifact answered (`rnn_lstm_v1`) |
 
-**Model:** `rnn_lstm` (macro-F1 - see [Decisions §22](docs/design/decisions.md) for the full comparison against the other three trained models)
+**Model:** `rnn_lstm` (macro-F1 - see [Decisions §7](docs/design/decisions.md) for the full comparison against the other three trained models)
 **Deployed:** local dev - not deployed to a public host
+**Interactive docs:** `http://127.0.0.1:8000/docs` (Swagger UI) or `/redoc` - generated directly from `serving/app.py`'s Pydantic models, so it's always accurate to the actual code, not hand-written documentation that can drift out of sync
 
 ## Serving API Reflection
 
 **1. What would happen if a new required field were added to `/predict` (e.g. a `language` field)?**
-Adding it as *optional* (with a default) is a non-breaking change — existing callers keep working exactly as before, since FastAPI/Pydantic only requires fields that don't have a default. Making it *required* would be breaking: every existing caller who doesn't send it would suddenly get a `422` they weren't getting before. The safe path: add it optional first, let consumers start sending it if they want to, and only make it required in a new versioned endpoint (e.g. `/v2/predict`) if it ever truly needs to be mandatory — never change what an existing endpoint requires out from under callers already depending on it.
+Add it as *optional*, with a default. That's non-breaking — FastAPI/Pydantic only enforces fields with no default, so every existing caller keeps working. Making it required immediately would break them: anyone still sending the old request shape would start getting `422`s they never got before. Optional first, mandatory later (in a new versioned endpoint like `/v2/predict`) if it truly needs to be required — never change what an existing endpoint expects out from under callers already depending on it. Recorded as policy in [Decisions §13](docs/design/decisions.md).
 
 **2. Is returning a hard failure the right response when the model file is missing at startup?**
-This project already handles this the safer way, not the naive one: `serving/app.py` catches the missing-file case at startup (`OSError`/`FileNotFoundError`), logs a warning, and keeps the app running with `_model = None` instead of crashing outright. `/health` then honestly reports `"model_not_loaded"` instead of pretending everything's fine, and `/predict` returns a `503 Service Unavailable` (not a `500`) — `503` specifically means "the service is temporarily unable to handle this, try again later," which is the accurate meaning here, versus `500`'s "something broke unexpectedly." A caller (or an uptime monitor) can tell the difference between "this API is broken" and "this API is up but not ready yet."
+A hard crash was considered and rejected. `serving/app.py` catches the missing-file case at startup (`OSError`/`FileNotFoundError`), logs a warning, and keeps running with `_model = None`. `/health` reports `"model_not_loaded"` instead of a false "all good." `/predict` returns `503`, not `500` — `503` means "temporarily can't handle this, try again," which is accurate here; `500` means "something broke unexpectedly," which isn't. That lets a caller, or an uptime monitor, tell "the API is broken" apart from "the API is up but not ready yet." Full rationale: [Decisions §13](docs/design/decisions.md).
 
 **3. If confidence scores looked suspiciously identical across many different inputs, what would you suspect?**
-That would point at the input never actually reaching the model correctly — for example, a bug in `_encode()` silently producing the same all-padding token sequence regardless of the real text, or a stale/cached tensor being reused instead of the current request's. To check: feed two genuinely different reviews (a clearly positive one, a clearly negative one) through `/predict` and confirm the `probabilities` actually differ meaningfully; if they don't, inspect what `_encode()` actually produces for each input before it reaches the model.
+The input isn't reaching the model correctly. Possible causes: a bug in `_encode()` producing the same all-padding sequence regardless of the real text, or a stale tensor being reused across requests. To check: feed two clearly different reviews (one positive, one negative) through `/predict` and confirm `probabilities` actually moves. If it doesn't, inspect what `_encode()` outputs for each input before it reaches the model.
 
 **4. If a future model swap ever returned a confidence outside [0.0, 1.0], what happens end to end?**
-`PredictResponse.confidence` is constrained with `Field(..., ge=0.0, le=1.0)` specifically for this. Because `/predict` is declared with `response_model=PredictResponse`, FastAPI validates the *outgoing* response against that schema, not just incoming requests. An out-of-range value would fail that validation, and the caller would see a `500` — a loud, honest failure — instead of silently receiving a nonsensical confidence number they might trust.
+`PredictResponse.confidence` is constrained with `Field(..., ge=0.0, le=1.0)` for exactly this case. `/predict` uses `response_model=PredictResponse`, so FastAPI validates the *outgoing* response too, not just incoming requests. An out-of-range value fails that validation, and the caller sees a `500` — a loud failure, not a confidence number that looks valid but isn't.
 
 **5. What's still missing before this could safely serve real production traffic?**
-Being honest about what's *not* built, not just what is:
-- **No rate limiting or authentication.** CORS is wide open (`allow_origins=["*"]`) and there's no API key or user auth at all — appropriate for a local dev demo, not for a public endpoint.
-- **No monitoring or drift detection.** Nothing logs predictions over time or tracks how confidence/accuracy might change once the API sees real, unseen traffic — this is a later phase of work (monitoring, drift, retraining triggers) that this project hasn't started yet.
-- **No concurrency/load testing.** The latency numbers in `serving/README.md` are all measured sequentially, one request at a time — the API has never been tested under real concurrent request volume, and there's no request queueing or batching if it needed to handle that.
+What's not built, not just what is:
+- **No rate limiting or authentication.** CORS is wide open (`allow_origins=["*"]`), no API key or user auth. Fine for local dev, not for a public endpoint.
+- **No automated retraining pipeline.** [Monitoring](docs/monitoring.md) logs every prediction and can flag when retraining looks justified, but nothing acts on that automatically. Retraining is still a manual `dvc repro --force train_rnn` (see [Decisions §12](docs/design/decisions.md) for why).
+- **No concurrency/load testing.** Every latency number in `serving/README.md` came from sequential, one-at-a-time requests. Untested under real concurrent load, with no request queueing or batching.

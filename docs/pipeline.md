@@ -40,7 +40,7 @@ all four training stages ──▶ training/tracking.py ──▶ mlflow.db + ml
    apostrophes normalized first) and attaches negators to the following
    content word (`not good` → `not_good`, `not the best` → `not_best`), while
    fixed phrases like `no one` are left split — see
-   [Decisions §10, §21](design/decisions.md). The `No Positive`/`No Negative`
+   [Decisions §1, §10](design/decisions.md). The `No Positive`/`No Negative`
    placeholder is stripped at the source, before it can leak into any text
    column — see [Decisions §1](design/decisions.md).
    Rows whose `clean_review` comes out empty (text was only placeholders or
@@ -77,7 +77,7 @@ all four training stages ──▶ training/tracking.py ──▶ mlflow.db + ml
 7. **Train transformer** — `python -m training.train_transformer`
    Fine-tunes a pretrained BERT-tiny encoder on the same splits, so its
    macro-F1 is directly comparable to the other three (see
-   [Decisions §15](design/decisions.md) for why BERT-tiny, not a larger
+   [Decisions §7](design/decisions.md) for why BERT-tiny, not a larger
    checkpoint).
 
 None of this trains a server - the four steps above only produce files under
@@ -86,8 +86,13 @@ exists and `serving/` can turn it into a running API. That's a separate
 concern on purpose: DVC reproduces a pipeline that runs once and finishes,
 and a server does the opposite - it starts and keeps running. See
 [serving/README.md](../serving/README.md) for how to run the API and the UI
-on top of it, and [Decisions §22-23](design/decisions.md) for why `rnn_lstm`
+on top of it, and [Decisions §7, §11](design/decisions.md) for why `rnn_lstm`
 is the model actually served.
+
+Once the API is running, `monitoring/` is a third, separate concern again -
+it watches what the API does over time rather than producing an artifact
+`dvc repro` would track. See [Monitoring](monitoring.md) and
+[Decisions §12](design/decisions.md).
 
 ## Schema contract
 
@@ -117,7 +122,7 @@ copy for `logreg`/`linear_svc` only, so an old version of those two is never
 lost even after retraining. Compare all runs with
 `python -m training.compare_runs` (`--md` writes
 [`docs/model_leaderboard.md`](model_leaderboard.md)). Details:
-[Decisions §16](design/decisions.md).
+[Decisions §9](design/decisions.md).
 
 ## Reproducibility
 
@@ -130,4 +135,4 @@ is logged, not just the final model file. The one known gap: exact library
 versions aren't locked in `requirements.txt`, so results could shift if
 installed fresh months later — a snapshot of the installed versions is logged
 per run so that drift is at least visible after the fact, even though it
-isn't prevented. Details: [Decisions §16](design/decisions.md).
+isn't prevented. Details: [Decisions §9](design/decisions.md).

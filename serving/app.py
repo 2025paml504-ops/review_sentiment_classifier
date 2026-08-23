@@ -1,9 +1,10 @@
-"""FastAPI serving layer for the sentiment classifier (M4).
+"""FastAPI serving layer for the sentiment classifier.
 
 Serves `rnn_lstm` - the model with the highest macro-F1 (this project's
 headline metric, decisions.md #14) on the current data. See decisions.md
 §22 for the full history of how the served model was chosen, and §23 for
-why the UI needs CORS enabled here.
+why the UI needs CORS enabled here. Every prediction is also logged for
+monitoring (docs/monitoring.md) - see monitoring/prediction_log.py.
 
 How this file is organized, top to bottom:
 
@@ -43,6 +44,7 @@ from torch import nn
 from torch.nn.utils.rnn import pack_padded_sequence
 
 from features.build_features import SENTIMENT_LABELS, clean_text
+from monitoring import prediction_log
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
 logger = logging.getLogger("serving")
@@ -204,8 +206,7 @@ def predict(request: PredictRequest) -> PredictResponse:
         # against an empty string.
         raise HTTPException(
             status_code=422,
-            detail="Text cleaned to an empty document (only punctuation, numbers, "
-            "or placeholder content) - nothing left to score.",
+            detail="Invalid entry - please write a sentence using words.",
         )
 
     # Step 2: text -> ids -> the model -> a probability per class.
@@ -217,7 +218,27 @@ def predict(request: PredictRequest) -> PredictResponse:
     best_idx = int(logits.argmax())
     latency_ms = (time.perf_counter() - start) * 1000
 
-    # Step 3: package the response.
+    # Step 3: log the prediction for monitoring (docs/monitoring.md) - wrapped
+    # so a logging failure (e.g. a locked database file) can never turn a
+    # working prediction into a failed request; the response is already
+    # correct at this point regardless of whether the log write succeeds.
+    tokens = cleaned.split()
+    try:
+        prediction_log.log_prediction(
+            cleaned_text=cleaned,
+            token_count=len(tokens),
+            oov_token_count=sum(1 for t in tokens if t not in _vocab),
+            sentiment=ID2LABEL[best_idx],
+            confidence=float(proba[best_idx]),
+            probabilities=probabilities,
+            latency_ms=latency_ms,
+            model_version=MODEL_VERSION,
+            source="api",
+        )
+    except Exception:
+        logger.exception("Failed to log prediction - continuing anyway")
+
+    # Step 4: package the response.
     return PredictResponse(
         sentiment=ID2LABEL[best_idx],
         confidence=float(proba[best_idx]),

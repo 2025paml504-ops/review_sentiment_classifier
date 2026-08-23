@@ -83,7 +83,7 @@ Match the existing code when adding new work:
 
 ### Change which model gets served, or edit the API/UI
 1. Whatever model you're switching to must already have a metrics file to
-   compare against the others on macro-F1 (§14) - see the recipe above.
+   compare against the others on macro-F1 (§8) - see the recipe above.
 2. Edit `serving/app.py`: model loading at startup, and the inference code
    in `predict()` if the new model's input/output shape differs from the
    current one (a HuggingFace model and a plain PyTorch checkpoint, for
@@ -98,7 +98,7 @@ Match the existing code when adding new work:
    crash.
 5. `ui/index.html` only talks to `/predict`'s existing request/response
    shape - it doesn't need changes unless that shape itself changed.
-6. Record the change in [Decisions §22](design/decisions.md) - which model,
+6. Record the change in [Decisions §7](design/decisions.md) - which model,
    why, and what it cost (latency, dependencies) compared to the alternative.
 
 ## Before you commit

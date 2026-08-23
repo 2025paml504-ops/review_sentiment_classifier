@@ -1,28 +1,27 @@
 # Architecture guide
 
-[← Design docs](README.md) · Related: [Decisions](decisions.md) · [Pipeline](../pipeline.md) · [Versioning](../versioning.md)
+[← Design docs](README.md) · Related: [Decisions](decisions.md) · [Pipeline](../pipeline.md) · [Versioning](../versioning.md) · [Monitoring](../monitoring.md)
 
 ## Overview
 
-There are two parts to this project.
+Three parts to this project.
 
-The **training pipeline** takes raw hotel reviews and turns them into a
-trained model. It runs as a series of small steps, one after another - clean
-the text, check it looks right, save it somewhere, turn it into numbers, then
-train a model on those numbers. Each step is its own Python file, and each
-one reads what the last step produced. DVC is the tool that runs these steps
-in order and only re-runs a step if something it depends on actually changed.
-Every time a model gets trained, the settings and the score get logged too,
-using a tool called MLflow, so it's possible to look back and see what was
-tried and what happened.
+The **training pipeline** turns raw hotel reviews into a trained model:
+clean the text, validate it, store it, vectorize it, train. Each stage is
+its own Python module reading the previous stage's output. DVC runs the
+stages in dependency order and skips anything unchanged. Every run's
+settings and score are logged to MLflow.
 
-The **serving part** is separate from all of that (more on why in
-[Decisions §22-23](decisions.md)). It's a small API that loads one of the
-four trained models - `rnn_lstm` - and lets you send it a review and get a
-prediction back. There's also a simple web page on top of that API so a
-person can just type something in and see the result, instead of needing to
-send requests manually. The two halves connect through one shared folder,
-`model_store/` - training writes files there, and serving reads one of them.
+The **serving part** is separate by design (Decisions §7, §11). A FastAPI
+service loads `rnn_lstm` and scores incoming text; a static page calls that
+API. The two halves connect through one shared folder, `model_store/` -
+training writes files there, serving reads one of them.
+
+The **monitoring part** watches the serving API after deployment
+([Monitoring](../monitoring.md)). Every prediction is logged, a
+training-time baseline is recorded once, and `monitoring/monitor.py`
+compares current behavior against that baseline on four signals, flagging
+when retraining is evidence-justified rather than scheduled.
 
 ## Components & layers
 
@@ -37,6 +36,7 @@ send requests manually. The two halves connect through one shared folder,
 | **`mlflow.db`, `mlruns/`** | Where the training logs actually live on disk. Not checked into git - it's just a record, not code. |
 | **`serving/`**   | `app.py` is the API. It has a `/health` check and a `/predict` endpoint, and it currently serves `rnn_lstm`. The `Dockerfile` at the repo root packages it so it runs the same way anywhere. |
 | **`ui/`**        | `index.html` - one plain web page that calls the API and shows what it says. No extra tools or setup needed to run it. |
+| **`monitoring/`** | Logs every prediction the API serves, records a training-time baseline, simulates drift with a hand-labeled modern-slang review set, and checks four signals to decide whether retraining is justified. See [Monitoring](../monitoring.md). |
 
 ## Data flow
 
@@ -92,6 +92,8 @@ ui/index.html   (run separately, e.g. python -m http.server 8090)
 - **transformers** (HuggingFace) — fine-tunes the pretrained BERT-tiny model.
 - **MLflow** — logs every run's settings and scores so past results aren't lost.
 - **FastAPI** — what the API is built with.
+- **SciPy** — the Kolmogorov-Smirnov test `monitoring/monitor.py` uses to
+  check for confidence-score drift.
 
 See [Decisions](decisions.md) for why each of these got picked over other options.
 
@@ -125,6 +127,8 @@ Where you'd go to make common changes:
   stage to `dvc.yaml`.
 - **Changing what the API serves** → `serving/app.py`. Right now it serves
   `rnn_lstm`, and it's packaged with the `Dockerfile` at the repo root
-  (§22).
+  (§7).
 - **Changing the UI** → `ui/index.html`. Plain HTML/CSS/JavaScript, nothing
-  to install or build (§23).
+  to install or build (§11).
+- **Changing what gets monitored** → `monitoring/monitor.py`'s threshold
+  constants, each commented with why that number was picked (§12).
