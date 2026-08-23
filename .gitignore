@@ -1,0 +1,14 @@
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+mlruns/
+logs/*.jsonl
+reports/*.json
+models/*.joblib
+models/metadata.json
+data/processed/*
+!data/processed/.gitkeep
+.env
+

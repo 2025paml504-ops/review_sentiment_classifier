@@ -1,0 +1,42 @@
+name: ci
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test-train-smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - run: pip install -e ".[dev]"
+      - run: ruff check .
+      - run: pytest
+      - run: python scripts/make_demo_data.py
+      - run: python -m text_classifier.data
+      - run: python -m text_classifier.train
+      - name: API smoke test
+        run: |
+          uvicorn text_classifier.api:app --host 127.0.0.1 --port 8000 &
+          python - <<'PY'
+          import json, time, urllib.request
+          for _ in range(20):
+              try:
+                  request = urllib.request.Request(
+                      "http://127.0.0.1:8000/predict",
+                      data=json.dumps({"text": "I was charged twice"}).encode(),
+                      headers={"Content-Type": "application/json"},
+                  )
+                  with urllib.request.urlopen(request) as response:
+                      assert json.load(response)["label"]
+                  break
+              except Exception:
+                  time.sleep(0.5)
+          else:
+              raise RuntimeError("API failed to start")
+          PY
+
