@@ -164,22 +164,39 @@ complexity - open the file and it works, nothing to install or compile.
 
 **Decision.** Full design: [Monitoring & retraining](../monitoring.md).
 Every prediction is logged to SQLite (`monitoring/prediction_log.py`); a
-training-time baseline is recorded once (`monitoring/baseline.py`); a
-30-review, hand-labeled modern-slang set simulates unfamiliar-vocabulary
-traffic (`monitoring/simulate_drift.py`); `monitoring/monitor.py` checks
-four signals against the baseline - vocabulary drift and confidence/output
-drift (label-free, warn early) and macro-F1 drop (the direct signal, but
-only computable with true labels) - and recommends retraining only on
-measured evidence, never a fixed schedule. The monitor reports; it doesn't
-retrain or redeploy automatically - `dvc repro --force train_rnn` stays a
-manual step, matching this project's preference for locally-runnable tools
-over heavier automation (§4, §9).
+training-time baseline is recorded once (`monitoring/baseline.py`, now a
+DVC stage - see below); a 30-review, hand-labeled modern-slang set
+simulates unfamiliar-vocabulary traffic (`monitoring/simulate_drift.py`);
+`monitoring/monitor.py` checks four signals against the baseline -
+vocabulary drift and confidence/output drift (label-free, warn early) and
+macro-F1 drop (the direct signal, but only computable with true labels) -
+and recommends retraining only on measured evidence, never a fixed
+schedule. The monitor reports; it doesn't retrain or redeploy
+automatically - `dvc repro --force train_rnn` stays a manual step,
+matching this project's preference for locally-runnable tools over
+heavier automation (§4, §9).
 
 **Why.** The API returns a valid `200` and a normal-range confidence even
 when predictions have drifted - nothing in the response format changes, so
 catching it needs active comparison against a baseline. On the drift set,
 macro-F1 falls to 0.7600 from a 0.8918 baseline, and two of the four
 signals fire.
+
+**Why only `baseline` is a DVC stage, not `simulate_drift`/`monitor`.**
+DVC's model is a reproducible build: given fixed inputs, always produce
+the same cached output, only rerun when a dependency's hash changes.
+`baseline.py` fits exactly - given a fixed `rnn_lstm_v1.pt` and a fixed
+`test_v1.csv`, it always produces the same `baseline.json`, so it's a
+stage that auto-reruns whenever a retrain produces a new model.
+`monitor.py`, especially `--source api`, doesn't fit that shape at all -
+it depends on `predictions.db`, which grows continuously as real requests
+arrive, and its whole purpose is answering "how does traffic look right
+now," on demand, not producing a cacheable build artifact. Forcing it into
+the DVC DAG would be modeling a live, ever-changing check as a one-time
+reproducible build, which it isn't. `simulate_drift.py` is deterministic
+enough that it could go either way, but its purpose is exploratory
+("try this against the model"), not something else in the pipeline
+depends on - left as a script, not a stage, for that reason alone.
 
 ## 13. API failure handling and contract-change policy
 

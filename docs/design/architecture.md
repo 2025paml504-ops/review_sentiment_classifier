@@ -40,9 +40,12 @@ when retraining is evidence-justified rather than scheduled.
 
 ## Data flow
 
-The DVC pipeline (defined in `dvc.yaml`, run with `dvc repro`) stops once it
-has produced trained models in `model_store/`. Serving picks up after that,
-and you start it yourself - `dvc repro` doesn't do it for you:
+The DVC pipeline (defined in `dvc.yaml`, run with `dvc repro`) covers
+everything reproducible given fixed inputs - trained models, and the
+training-time baseline monitoring compares against. Serving, and the
+on-demand monitoring checks, start by hand - `dvc repro` doesn't do that
+for you, because neither is a "same inputs → same output" build the way
+the stages below are (§12 has the full reasoning for the DVC boundary):
 
 ```
 data/raw/Hotel_Reviews.csv
@@ -59,6 +62,10 @@ data/processed/train_v1.csv + test_v1.csv  +  model_store/tfidf_vectorizer_v1.pk
     ▼
 model_store/*  +  training/metrics*.json  ──▶ training/tracking.py ──▶ mlflow.db
     │
+    │  train_rnn's rnn_lstm_v1.pt feeds one more DVC stage:
+    ▼
+baseline   (python -m monitoring.baseline)  ──▶  monitoring/baseline.json
+    │
     │  (the DVC pipeline stops here - everything past this point is started by hand)
     ▼
 model_store/rnn_lstm_v1.pt + rnn_lstm_v1_vocab.json
@@ -70,7 +77,7 @@ REST API on :8000  (/health, /predict)
     │  the browser                 ▼
 ui/index.html               monitoring/predictions.db  (monitoring/prediction_log.py)
 (run separately, e.g.              │
-python -m http.server 8090)        │  monitoring.baseline / simulate_drift / monitor
+python -m http.server 8090)        │  monitoring.simulate_drift / monitor (checked against baseline.json)
                                     ▼
                           retraining recommendation (evidence-based, not scheduled)
 ```
@@ -84,7 +91,8 @@ python -m http.server 8090)        │  monitoring.baseline / simulate_drift / m
 | `train` / `train_linear_svc` | both splits, `tfidf_vectorizer_v1.pkl`, `train_linear.py`, `tracking.py` | a trained model + its scores |
 | `train_rnn`      | both splits, `train_rnn.py`, `tracking.py`                | `rnn_lstm_v1.pt` + its vocabulary file + scores               |
 | `train_transformer` | both splits, `train_transformer.py`, `tracking.py`     | `bert_tiny_v1/` + scores                        |
-| monitoring *(started by hand, not a DVC stage)* | every `/predict` request; the held-out test split (`monitoring/baseline.py`); the hand-labeled drift set (`monitoring/simulate_drift.py`) | `monitoring/predictions.db`, `baseline.json`, `drift_report.json`, and a retraining recommendation |
+| `baseline`       | `test_v1.csv`, `rnn_lstm_v1.pt` + vocab, `baseline.py`, `serving/app.py` | `monitoring/baseline.json` - auto-reruns whenever a retrain produces a new `rnn_lstm_v1.pt` |
+| monitoring *(started by hand, not a DVC stage - §12 explains why)* | every `/predict` request; `baseline.json`; the hand-labeled drift set (`monitoring/simulate_drift.py`) | `monitoring/predictions.db`, `drift_report.json`, and a retraining recommendation |
 
 ## Tech stack
 

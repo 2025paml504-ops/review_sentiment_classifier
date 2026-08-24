@@ -103,3 +103,20 @@ stages:
     metrics:
       - training/metrics_transformer.json:
           cache: false
+
+  # Deterministic given a fixed rnn_lstm and a fixed test split - a real
+  # DVC stage, unlike monitor.py/simulate_drift.py (which check whatever
+  # traffic/traffic-simulation exists at the moment they're run, not a
+  # cacheable build artifact - see docs/monitoring.md, "What this is not").
+  # Auto-reruns whenever a retrain produces a new rnn_lstm.
+  baseline:
+    cmd: python -m monitoring.baseline
+    deps:
+      - data/processed/test_v1.csv
+      - model_store/rnn_lstm_v1.pt
+      - model_store/rnn_lstm_v1_vocab.json
+      - monitoring/baseline.py
+      - serving/app.py
+    outs:
+      - monitoring/baseline.json:
+          cache: false

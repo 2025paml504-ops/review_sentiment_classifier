@@ -55,12 +55,19 @@ Every comparison below needs something to compare against.
 `monitoring/baseline.py` scores the held-out test split (the same split
 `rnn_lstm`'s reported macro-F1 is measured on, [Decisions
 §7](design/decisions.md)) with the served model and saves: the full array
-of confidence scores, the predicted POSITIVE share, and the
-out-of-vocabulary rate. Re-run it after any retrain, since a new model
-needs a new baseline.
+of confidence scores, the predicted POSITIVE share, the out-of-vocabulary
+rate, and the per-row token/OOV-count arrays the signal drift report below
+uses.
+
+Unlike `simulate_drift.py`/`monitor.py`, this one **is** a DVC stage - it's
+deterministic given a fixed model and a fixed test split, so it belongs in
+the reproducible pipeline rather than being a script run by hand ([Decisions
+§12](design/decisions.md) has the full reasoning for that boundary). It
+auto-reruns whenever `train_rnn` produces a new `rnn_lstm_v1.pt`:
 
 ```bash
-python -m monitoring.baseline
+dvc repro baseline        # the DVC-tracked way - only reruns if something changed
+python -m monitoring.baseline    # equivalent, run directly, always reruns
 ```
 
 ## Simulating drift

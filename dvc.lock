@@ -228,3 +228,31 @@ stages:
       hash: md5
       md5: 7d332b572cc287f57e751b38445a7c74
       size: 895
+  baseline:
+    cmd: python -m monitoring.baseline
+    deps:
+    - path: data/processed/test_v1.csv
+      hash: md5
+      md5: 389010a9b33aa96f77b617664919a3b9
+      size: 38906120
+    - path: model_store/rnn_lstm_v1.pt
+      hash: md5
+      md5: 67aab041f002321f84a32094504d2910
+      size: 10773893
+    - path: model_store/rnn_lstm_v1_vocab.json
+      hash: md5
+      md5: b520244465005b7a0efe77a84c345c44
+      size: 357937
+    - path: monitoring/baseline.py
+      hash: md5
+      md5: 1be65cca95a6a1be523da37a3044957b
+      size: 4269
+    - path: serving/app.py
+      hash: md5
+      md5: f9d12003b61702340efbec60692e8780
+      size: 10416
+    outs:
+    - path: monitoring/baseline.json
+      hash: md5
+      md5: 8f319e00ce3e338bdcc7489a7cb6326d
+      size: 4200922
