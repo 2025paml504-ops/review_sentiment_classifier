@@ -34,8 +34,3 @@ tiktoken
 # nothing extra - it's plain HTML/CSS/JS with no build step.
 fastapi
 uvicorn
-
-# Monitoring & drift detection (monitoring/), added (v1.6). scipy is already
-# installed transitively via scikit-learn, but monitor.py imports it
-# directly (the KS test), so it's named explicitly here too.
-scipy

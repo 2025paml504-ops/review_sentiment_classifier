@@ -97,8 +97,6 @@ python -m http.server 8090)        │  monitoring.baseline / simulate_drift / m
 - **transformers** (HuggingFace) — fine-tunes the pretrained BERT-tiny model.
 - **MLflow** — logs every run's settings and scores so past results aren't lost.
 - **FastAPI** — what the API is built with.
-- **SciPy** — the Kolmogorov-Smirnov test `monitoring/monitor.py` uses to
-  check for confidence-score drift.
 
 See [Decisions](decisions.md) for why each of these got picked over other options.
 

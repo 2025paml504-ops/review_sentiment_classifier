@@ -1,0 +1,42 @@
+INFO: ============================================================
+INFO: RETRAIN RECOMMENDED - triggered by: output_balance_drift, performance_drop
+{
+  "source": "drift_simulation",
+  "n_predictions": 60,
+  "below_min_window": false,
+  "checks": {
+    "confidence_drift": {
+      "window_mean_confidence": 0.9105,
+      "baseline_mean_confidence": 0.9532,
+      "baseline_std_confidence": 0.1021,
+      "z_score": 0.4183,
+      "triggered": false
+    },
+    "oov_drift": {
+      "window_oov_rate": 0.0561,
+      "baseline_oov_rate": 0.0074,
+      "delta": 0.0487,
+      "triggered": false
+    },
+    "output_balance_drift": {
+      "window_positive_share": 0.6667,
+      "baseline_positive_share": 0.8263,
+      "delta": -0.1597,
+      "triggered": true
+    },
+    "performance_drop": {
+      "n_labeled": 60,
+      "accuracy": 0.7667,
+      "macro_f1": 0.76,
+      "trained_macro_f1": 0.8918,
+      "drop": 0.1318,
+      "triggered": true
+    }
+  },
+  "retrain_recommended": true,
+  "triggered_by": [
+    "output_balance_drift",
+    "performance_drop"
+  ],
+  "low_confidence_triggers": []
+}

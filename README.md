@@ -1,6 +1,5 @@
 # review_sentiment_classifier
 
-
 A sentiment classifier for hotel reviews. A travel e-commerce platform wants to
 automatically classify incoming hotel-review text by sentiment into two
 classes: **NEGATIVE** and **POSITIVE**.
@@ -8,6 +7,19 @@ classes: **NEGATIVE** and **POSITIVE**.
 Built on an all-open-source stack: `pandas`, `SQLAlchemy` (SQLite),
 `scikit-learn`, `DVC` for data/artifact versioning, `MLflow` for experiment
 tracking, and `PyTorch`/`transformers` for the recurrent and transformer models.
+
+## Evaluator quick links
+
+Everything the submission checklist asks for, mapped to exactly where it lives
+in this repository:
+
+| # | Deliverable | Where to look |
+|---|---|---|
+| 1 | Versioned pipeline, commit history | [`dvc.yaml`](dvc.yaml) — pipeline stages<br>[`dvc.lock`](dvc.lock) — pinned versions<br>Commit history (GitHub "Commits" tab) |
+| 2 | Experiment tracking & model comparison | [Decisions §7](docs/design/decisions.md#7-four-models-trained-rnn_lstm-served) — comparison table<br>[Model leaderboard](docs/model_leaderboard.md)<br>[MLflow tracking write-up](submission/MLflow%20Experiment%20Tracking%20-%20What%20Was%20Done.docx) — real screenshots + exported run data |
+| 3 | Deployed API, sample request/response | [`serving/app.py`](serving/app.py) — the API<br>[`serving/README.md`](serving/README.md) — curl commands + real sample responses<br>[`api_test_results.txt`](submission/api_test_results.txt) — 11/11 checks passed against the live API |
+| 4 | Monitoring log, drift report, retraining trigger design | [Monitoring & retraining](docs/monitoring.md) — design + signals<br>[`drift_monitor_report.txt`](submission/drift_monitor_report.txt) — full `monitor.py` output, incl. retrain verdict<br>[`predictions_log.csv`](submission/predictions_log.csv) — exported prediction log |
+| 5 | README, architecture diagram, demo | This file<br>[Architecture](docs/design/architecture.md)<br>Demo — delivered separately |
 
 ## Quick start
 
@@ -20,9 +32,28 @@ python3 -m venv .venv
 .venv/bin/dvc repro
 ```
 
+**Windows (PowerShell)**: `.venv/bin/...` is the macOS/Linux venv layout; on
+Windows the same virtual environment uses a `Scripts\` folder instead. Either
+prefix every command with `.venv\Scripts\` (e.g. `.venv\Scripts\pip install
+-r requirements.txt`), or activate the environment once and drop the prefix
+for the rest of the session:
+
+```powershell
+python -m venv .venv
+.venv\Scripts\Activate.ps1
+pip install -r requirements.txt
+```
+
+If activation is blocked with an execution-policy error, run this once (as
+your own user, not admin), then retry `Activate.ps1`:
+
+```powershell
+Set-ExecutionPolicy -Scope CurrentUser RemoteSigned
+```
+
 `dvc repro` runs the pipeline stages in dependency order and skips anything
-already up-to-date. The pipeline trains four models; `train_rnn` produces
-`rnn_lstm` - the model `serving/` actually uses, and a fast stage. Run
+already up-to-date. The pipeline trains four models; `train_rnn` - a fast
+stage - produces `rnn_lstm`, the model `serving/` actually uses. Run
 `dvc repro train_rnn` to stop there instead of running all four.
 
 Then, to run the API and the UI (needs `rnn_lstm` from the step above):
@@ -59,11 +90,20 @@ that traffic still looks like the training data, or a hand-labeled
 modern-slang set built to simulate drift:
 
 ```bash
+curl http://127.0.0.1:8000/health                 # confirm the API is up
 .venv/bin/python3 -m monitoring.baseline          # record what "normal" looks like (run once, or after any retrain)
-.venv/bin/python3 -m monitoring.simulate_drift    # score a hand-labeled, modern-slang review set
+.venv/bin/python3 -m monitoring.simulate_drift    # generate traffic - score a hand-labeled, modern-slang review set
+.venv/bin/python3 -c "from monitoring import prediction_log; print(prediction_log.read_predictions(source='drift_simulation').to_string())"  # confirm it was logged
 .venv/bin/python3 -m monitoring.monitor --source drift_simulation   # check for drift + a retraining recommendation
-.venv/bin/python3 -m monitoring.monitor --source api                 # same check, against real logged traffic
-.venv/bin/python3 -c "from monitoring import prediction_log; print(prediction_log.read_predictions().to_string())"  # inspect the raw log
+```
+
+The same steps work against real traffic instead of the simulated set - send
+a few requests through the UI or `/predict` first, then swap
+`drift_simulation` for `api`:
+
+```bash
+.venv/bin/python3 -c "from monitoring import prediction_log; print(prediction_log.read_predictions(source='api').to_string())"
+.venv/bin/python3 -m monitoring.monitor --source api
 ```
 
 Details, the four retraining-trigger signals, and the measured results:
@@ -141,6 +181,28 @@ also built — see [Monitoring & retraining](docs/monitoring.md) and
 **Model:** `rnn_lstm` (macro-F1 - see [Decisions §7](docs/design/decisions.md) for the full comparison against the other three trained models)
 **Deployed:** local dev - not deployed to a public host
 **Interactive docs:** `http://127.0.0.1:8000/docs` (Swagger UI) or `/redoc` - generated directly from `serving/app.py`'s Pydantic models, so it's always accurate to the actual code, not hand-written documentation that can drift out of sync
+
+### Testing it
+
+Sample `curl` commands and their real, captured responses (health check,
+positive review, negative review, edge cases) are in
+[`serving/README.md`](serving/README.md#endpoints) - copy/paste-ready, no
+extra tool needed:
+
+```bash
+uvicorn serving.app:app --reload --port 8000    # in one terminal
+
+curl http://127.0.0.1:8000/health
+curl -X POST http://127.0.0.1:8000/predict \
+  -H "Content-Type: application/json" \
+  -d '{"text": "The room was clean and the staff were incredibly friendly, best stay ever"}'
+```
+
+The same set of checks (status codes + response shape, for the health check
+and three `/predict` cases) has already been run against the live API and
+saved as a plain-text report:
+[`submission/api_test_results.txt`](submission/api_test_results.txt)
+(11/11 passed).
 
 ## Serving API Reflection
 

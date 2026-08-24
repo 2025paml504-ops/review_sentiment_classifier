@@ -6,8 +6,9 @@ retraining on a fixed calendar schedule.
 Four signals are checked, each a practical, honestly-scoped stand-in for
 the four retraining triggers described in docs/monitoring.md:
 
-    1. Output drift    - has the confidence-score distribution shifted
-                          (Kolmogorov-Smirnov test against the baseline)?
+    1. Output drift    - has the confidence score's average moved too far
+                          from the baseline (a z-score against the
+                          baseline's mean and standard deviation)?
     2. Input drift      - has the out-of-vocabulary rate risen (a proxy for
                           "customers are using words the model has never
                           seen" - exactly what new slang/topics looks like)?
@@ -44,11 +45,12 @@ logger = logging.getLogger("monitoring.monitor")
 
 # --- Thresholds, each picked and justified independently -------------------
 
-# A KS test p-value this low means the confidence-score distribution in the
-# current window is very unlikely to have come from the same distribution
-# as the training-time baseline - the standard significance cutoff (5%),
-# not tuned to this data.
-CONFIDENCE_KS_ALPHA = 0.05
+# |window mean confidence - baseline mean confidence| / baseline std > 1.0.
+# A window whose average confidence sits more than one baseline standard
+# deviation away from training-time behavior is treated as drifted - the
+# same per-feature z-score threshold used for numeric-feature drift checks
+# generally.
+CONFIDENCE_ZSCORE_ALERT = 1.0
 
 # +5 percentage points of out-of-vocabulary tokens above baseline. The
 # training vocabulary (train_rnn.py's build_vocabulary()) covers the 20,000
@@ -79,13 +81,16 @@ MIN_WINDOW_SIZE = 30
 
 
 def check_confidence_drift(window_confidence: np.ndarray, baseline_confidence: np.ndarray) -> dict:
-    from scipy import stats
-
-    ks_stat, p_value = stats.ks_2samp(baseline_confidence, window_confidence)
+    baseline_mean = float(baseline_confidence.mean())
+    baseline_std = float(baseline_confidence.std())
+    window_mean = float(window_confidence.mean())
+    z_score = abs(window_mean - baseline_mean) / baseline_std if baseline_std else 0.0
     return {
-        "ks_statistic": round(float(ks_stat), 4),
-        "p_value": round(float(p_value), 4),
-        "triggered": bool(p_value < CONFIDENCE_KS_ALPHA),
+        "window_mean_confidence": round(window_mean, 4),
+        "baseline_mean_confidence": round(baseline_mean, 4),
+        "baseline_std_confidence": round(baseline_std, 4),
+        "z_score": round(z_score, 4),
+        "triggered": bool(z_score > CONFIDENCE_ZSCORE_ALERT),
     }
 
 

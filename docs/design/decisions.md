@@ -178,7 +178,7 @@ over heavier automation (§4, §9).
 **Why.** The API returns a valid `200` and a normal-range confidence even
 when predictions have drifted - nothing in the response format changes, so
 catching it needs active comparison against a baseline. On the drift set,
-macro-F1 falls to 0.7600 from a 0.8918 baseline, and three of the four
+macro-F1 falls to 0.7600 from a 0.8918 baseline, and two of the four
 signals fire.
 
 ## 13. API failure handling and contract-change policy

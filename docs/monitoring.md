@@ -88,26 +88,40 @@ nothing about the API response itself would tell you this happened.
 baseline on four signals, and recommends retraining only when there's real
 evidence, not on a fixed schedule:
 
-| Signal | What it checks | Threshold | Why this number |
-|---|---|---|---|
-| Confidence drift | Kolmogorov-Smirnov test comparing the window's confidence-score distribution to the baseline's | p < 0.05 | The standard statistical-significance cutoff, not tuned to this data |
-| Vocabulary drift | Out-of-vocabulary rate vs. baseline | +5 percentage points | The training vocabulary is exactly the 20,000 most common training-era words (`train_rnn.py`); a sustained rise is the direct signature of new slang/topics |
-| Output drift | Predicted POSITIVE share vs. baseline (86.5% POSITIVE in the training data, [Decisions §2](design/decisions.md)) | ±10 percentage points | A swing this large means the model's output shape changed, regardless of whether any single feature explains why |
-| Performance drop | Macro-F1 on the window vs. the model's own reported test-set score (0.8918) | −0.05 or more | Only computable when the window has true labels - real traffic never does at request time (the ground-truth problem below) |
+| Signal | Concept | What it checks | Threshold | Why this number |
+|---|---|---|---|---|
+| Confidence drift | Proxy signal (z-score) | `\|window mean confidence - baseline mean confidence\| / baseline std` | z > 1.0 | The standard per-feature drift cutoff: one baseline standard deviation away from normal |
+| Vocabulary drift | Covariate shift proxy | Out-of-vocabulary rate vs. baseline | +5 percentage points | The training vocabulary is exactly the 20,000 most common training-era words (`train_rnn.py`); a sustained rise is the direct signature of new slang/topics |
+| Output drift | Label shift proxy | Predicted POSITIVE share vs. baseline (86.5% POSITIVE in the training data, [Decisions §2](design/decisions.md)) | ±10 percentage points | A swing this large means the model's output shape changed, regardless of whether any single feature explains why |
+| Performance drop | Concept drift, limited by ground-truth delay | Macro-F1 on the window vs. the model's own reported test-set score (0.8918) | −0.05 or more | Only computable when the window has true labels - real traffic never does at request time (the ground-truth problem below) |
+
+"Proxy signal" here means the same thing it means in monitoring generally: confidence and predicted-label share are measurable stand-ins for shifts we can't check directly at request time, since real traffic carries no ground truth. Vocabulary and output drift are the closest things this project has to a true covariate-shift / label-shift test - neither is a formal statistical test on the input features themselves, just a direct proxy for one. Performance drop is the only signal that touches concept drift (a change in how features relate to sentiment), and it's gated by ground-truth delay: it only runs on the hand-labeled drift set, never on live traffic.
+
+Confidence drift and vocabulary/output drift use two different techniques
+for the same underlying question - has this distribution moved enough to
+matter. Confidence drift is a per-feature z-score,
+`|window mean - baseline mean| / baseline standard deviation`, flagged past
+1.0 baseline standard deviations - the numeric-feature drift check.
+Vocabulary and output drift are compared by raw percentage-point shift
+instead, the categorical-feature equivalent, since both are already rates/
+shares rather than a raw score distribution.
 
 ```bash
 python -m monitoring.monitor --source drift_simulation
 python -m monitoring.monitor --source api
 ```
 
-On the drift set above, three of the four signals fire (confidence drift,
-output drift, and the performance drop - vocabulary drift comes close at
-+4.87pp but stays just under the 5pp bar), and the tool recommends
-retraining. A window under 30 predictions is treated as too small to trust
-- any of these checks can fire from pure sample noise on a handful of
-requests (found this by hand: two live test requests, one of each class,
-already swung the predicted-class share by 33 points) - so a small window
-is reported as a warning, not a retrain recommendation.
+On the drift set above, two of the four signals fire (output drift and the
+performance drop). Confidence drift stays under its z-score threshold, and
+vocabulary drift comes close at +4.87pp but stays just under the 5pp bar -
+still, the tool recommends retraining, since a measured accuracy drop and a
+16-point swing in the output mix are strong enough evidence on their own.
+
+A window under 30 predictions is treated as too small to trust, since any of
+these checks can fire from pure sample noise on a handful of requests
+(found this by hand: two live test requests, one of each class, already
+swung the predicted-class share by 33 points) - so a small window is
+reported as a warning, not a retrain recommendation.
 
 ## The ground-truth problem
 
@@ -118,6 +132,29 @@ needed to change that. Vocabulary drift and output-balance drift don't have
 this limitation: both are computable from the input text and the model's
 own output alone, which is why they can fire before any labeled example
 confirms a problem.
+
+## Worked example: the retraining decision
+
+Reading the four checks isn't the same as deciding whether to retrain. Walked
+through step by step, on the drift-simulation run above:
+
+| Question | Answer |
+|---|---|
+| What signals fired? | Output drift and performance drop (macro-F1 0.8918 → 0.76). Confidence drift (z-score 0.42) and vocabulary drift (+4.87pp) both stayed under their thresholds. |
+| Consistent with covariate shift? | Yes - OOV rate rose from 0.74% to 5.61%, close to the alert bar. The drift set is built from modern slang and post-2020 topics the training vocabulary has never seen, which is exactly what covariate shift (input distribution moving) looks like here. |
+| Is this concept drift, confirmed? | Yes, for this window specifically - unlike live traffic, the drift set carries hand-assigned true labels, so the macro-F1 drop is a measured fact, not a guess. |
+| Decision | Retraining is evidence-justified: the performance drop is directly measured, not inferred, and the output mix moved by 16 points. Confidence and vocabulary staying under threshold doesn't outweigh a measured accuracy drop this large. |
+
+Run the same check against real API traffic (`--source api`) instead of the
+drift set, and the picture changes: output drift can still fire, but
+performance drop always comes back `null` - there's no ground truth to
+score against, and confidence/vocabulary drift need a bigger, more sustained
+shift than any handful of test requests will show. That's the harder, more
+realistic case: one signal suggesting something moved, no proof yet that the
+model is actually wrong, and (until 30+ requests have landed) not even
+enough traffic to trust that one. The right move there isn't to retrain on
+suspicion - it's to keep collecting logged traffic, and treat the
+recommendation as a lead worth investigating, not a queued action.
 
 ## What this is not
 
