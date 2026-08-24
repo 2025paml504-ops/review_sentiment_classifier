@@ -83,6 +83,11 @@ def build_baseline(limit: int | None = None) -> dict:
         "confidence_scores": confidences.tolist(),
         "predicted_positive_share": float((predicted == "POSITIVE").mean()),
         "oov_rate": float(total_oov / total_tokens) if total_tokens else 0.0,
+        # Per-row token/OOV counts, saved (not just the aggregate rate above)
+        # so monitor.py can z-score them the same way it already does for
+        # confidence - one baseline distribution per numeric feature.
+        "token_counts": token_counts,
+        "oov_token_counts": oov_counts,
         "vocab_size": int(len(_vocab)),
         "source_csv": TEST_CSV.name,
     }

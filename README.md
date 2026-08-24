@@ -11,15 +11,18 @@ tracking, and `PyTorch`/`transformers` for the recurrent and transformer models.
 ## Evaluator quick links
 
 Everything the submission checklist asks for, mapped to exactly where it lives
-in this repository:
+in this repository. The raw files under `submission/` are real command
+output, not prose - if any of them are unclear on their own,
+[`submission/README.md`](submission/README.md) explains what each one is
+and how to read it before you open the raw data:
 
 | # | Deliverable | Where to look |
 |---|---|---|
 | 1 | Versioned pipeline, commit history | [`dvc.yaml`](dvc.yaml) — pipeline stages<br>[`dvc.lock`](dvc.lock) — pinned versions<br>Commit history (GitHub "Commits" tab) |
 | 2 | Experiment tracking & model comparison | [Decisions §7](docs/design/decisions.md#7-four-models-trained-rnn_lstm-served) — comparison table<br>[Model leaderboard](docs/model_leaderboard.md)<br>[MLflow tracking write-up](submission/MLflow%20Experiment%20Tracking%20-%20What%20Was%20Done.docx) — real screenshots + exported run data |
 | 3 | Deployed API, sample request/response | [`serving/app.py`](serving/app.py) — the API<br>[`serving/README.md`](serving/README.md) — curl commands + real sample responses<br>[`api_test_results.txt`](submission/api_test_results.txt) — 11/11 checks passed against the live API |
-| 4 | Monitoring log, drift report, retraining trigger design | [Monitoring & retraining](docs/monitoring.md) — design + signals<br>[`drift_monitor_report.txt`](submission/drift_monitor_report.txt) — full `monitor.py` output, incl. retrain verdict<br>[`predictions_log.csv`](submission/predictions_log.csv) — exported prediction log |
-| 5 | README, architecture diagram, demo | This file<br>[Architecture](docs/design/architecture.md)<br>Demo — delivered separately |
+| 4 | Monitoring log, drift report, retraining trigger design | [Monitoring & retraining](docs/monitoring.md) — design + signals<br>[`submission/README.md`](submission/README.md) — **explains what the two files below actually are**<br>[`drift_monitor_report.txt`](submission/drift_monitor_report.txt) — full `monitor.py` output, incl. retrain verdict<br>[`predictions_log.csv`](submission/predictions_log.csv) — exported prediction log |
+| 5 | README, architecture diagram, demo | This file<br>[Architecture](docs/design/architecture.md)<br>[Decisions](docs/design/decisions.md) — why each choice was made<br>Demo — delivered separately |
 
 ## Quick start
 

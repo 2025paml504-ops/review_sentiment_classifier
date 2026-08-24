@@ -11,6 +11,20 @@ that requires actively comparing current behavior against training-time
 behavior; this module does that comparison rather than waiting for a
 visible failure.
 
+## Monitoring vs. observability
+
+Two related but different questions:
+
+| | Monitoring | Observability |
+|---|---|---|
+| Answers | Is the system healthy? | Why is the system behaving this way? |
+| Requires | Knowing what to watch in advance | Rich, structured logs of inputs and outputs |
+| Example here | `monitor.py`'s four pass/fail checks | Querying `predictions.db` directly for any question - e.g. every prediction on a specific review, or everything scored below 50% confidence |
+
+Both rest on the same foundation: without a prediction log, there's no
+monitoring (nothing to check against a baseline) and no observability
+(nothing to query). `monitoring/prediction_log.py` is that foundation.
+
 ## What gets logged
 
 Every prediction - real API traffic and simulated traffic alike - is
@@ -82,29 +96,83 @@ that's still clearly, unambiguously positive or negative to a human reader
 is exactly the silent-failure symptom this whole system exists to catch -
 nothing about the API response itself would tell you this happened.
 
+## Drift types
+
+Four drift types, per the reference taxonomy this project's signals are
+mapped against:
+
+| Drift Type | P(X) | P(Y\|X) | P(Y) | Detection | Response |
+|---|---|---|---|---|---|
+| Covariate Shift | Changes | Stable | Indirect | KS/PSI on input features | Retrain or re-weight on recent data |
+| Label Shift | Stable | Stable | Changes | Score distribution shift; label rate monitoring | Recalibrate threshold; retrain on recent data |
+| Concept Drift | Stable | Changes | Changes | Ground truth accuracy drop; ADWIN on performance | Retrain on recent data only; old data may be harmful |
+| Combined Shift | Changes | Changes | Changes | Multiple signals simultaneously | Full investigation; may require new feature engineering |
+
+## The signal drift report
+
+Before the four trigger signals, `monitoring/monitor.py` prints a plain
+descriptive report - not itself a trigger, just a signal-by-signal look at
+how the window differs from training, the same way a by-hand comparison
+would:
+
+- **Numeric signals** - confidence, token count, and out-of-vocabulary
+  count, each shown as a z-score against its baseline distribution
+  (`|window mean - baseline mean| / baseline std`), flagged `DRIFTED` past
+  1.0 baseline standard deviations, `Stable` otherwise.
+- **Categorical signals** - a percentage breakdown of predicted sentiment
+  and traffic source in the window.
+- **Confidence distribution** - the window bucketed into LOW (<0.60),
+  MEDIUM (0.60-0.85), and HIGH (>0.85) confidence bands.
+
+Deliberately called *signals*, not *features*: none of these five are
+columns in `feature_store/feature_store.db`. That table does have real
+numeric feature columns from the original dataset (`Reviewer_Score`,
+`Review_Total_Negative_Word_Counts`, `Review_Total_Positive_Word_Counts`),
+but none of them are usable here - a live `/predict` request only ever
+sends raw `text`, never the pre-split review halves or score those columns
+depend on, so there's no live-request value to compare against a baseline.
+Token count and OOV count are used instead because they're the only
+numeric quantities computable identically from both the baseline text and
+a live request's text - a stand-in for a feature-store comparison, not an
+instance of one.
+
+This report exists to make a window's shape legible at a glance before
+looking at the pass/fail checks below - useful when a check is borderline
+(like vocabulary drift, which sits close to its bar without crossing it)
+and a reader wants to see the actual numbers behind that call, not just a
+true/false.
+
 ## Monitoring signals and retraining triggers
 
 `monitoring/monitor.py` compares a window of logged predictions against the
 baseline on four signals, and recommends retraining only when there's real
 evidence, not on a fixed schedule:
 
-| Signal | Concept | What it checks | Threshold | Why this number |
+| Signal | Drift type | What it checks | Threshold | Why this number |
 |---|---|---|---|---|
-| Confidence drift | Proxy signal (z-score) | `\|window mean confidence - baseline mean confidence\| / baseline std` | z > 1.0 | The standard per-feature drift cutoff: one baseline standard deviation away from normal |
-| Vocabulary drift | Covariate shift proxy | Out-of-vocabulary rate vs. baseline | +5 percentage points | The training vocabulary is exactly the 20,000 most common training-era words (`train_rnn.py`); a sustained rise is the direct signature of new slang/topics |
-| Output drift | Label shift proxy | Predicted POSITIVE share vs. baseline (86.5% POSITIVE in the training data, [Decisions §2](design/decisions.md)) | ±10 percentage points | A swing this large means the model's output shape changed, regardless of whether any single feature explains why |
-| Performance drop | Concept drift, limited by ground-truth delay | Macro-F1 on the window vs. the model's own reported test-set score (0.8918) | −0.05 or more | Only computable when the window has true labels - real traffic never does at request time (the ground-truth problem below) |
+| Confidence drift | General proxy - not one of the four types below | `\|window mean confidence - baseline mean confidence\| / baseline std` | z > 1.0 | The standard per-feature drift cutoff: one baseline standard deviation away from normal |
+| Vocabulary drift | Covariate shift - P(X) moving | Out-of-vocabulary rate vs. baseline | +5 percentage points | The training vocabulary is exactly the 20,000 most common training-era words (`train_rnn.py`); a sustained rise is the direct signature of new slang/topics |
+| Output drift | Label shift - label rate monitoring, matching the table above exactly | Predicted POSITIVE share vs. baseline (86.5% POSITIVE in the training data, [Decisions §2](design/decisions.md)) | ±10 percentage points | A swing this large means the model's output shape changed, regardless of whether any single feature explains why |
+| Performance drop | Concept drift - ground truth accuracy drop, matching the table above exactly | Macro-F1 on the window vs. the model's own reported test-set score (0.8918) | −0.05 or more | Only computable when the window has true labels - real traffic never does at request time (the ground-truth problem below) |
 
-"Proxy signal" here means the same thing it means in monitoring generally: confidence and predicted-label share are measurable stand-ins for shifts we can't check directly at request time, since real traffic carries no ground truth. Vocabulary and output drift are the closest things this project has to a true covariate-shift / label-shift test - neither is a formal statistical test on the input features themselves, just a direct proxy for one. Performance drop is the only signal that touches concept drift (a change in how features relate to sentiment), and it's gated by ground-truth delay: it only runs on the hand-labeled drift set, never on live traffic.
+Confidence drift is the one signal that doesn't map onto a single row of the
+drift-types table above - it isn't a check on input features (P(X)), the
+predicted-label rate (P(Y)), or accuracy (P(Y|X)), just a general "does this
+window's confidence look different" early-warning check. It's included as a
+companion signal, not a fifth drift type.
+
+When two or more of the other three signals fire together - as they do in
+the drift-simulation result below (output drift and performance drop both
+fire) - that's this project's real, measured instance of **Combined Shift**:
+multiple signals firing simultaneously, per the table above.
 
 Confidence drift and vocabulary/output drift use two different techniques
 for the same underlying question - has this distribution moved enough to
-matter. Confidence drift is a per-feature z-score,
+matter. Confidence drift is a numeric-signal z-score,
 `|window mean - baseline mean| / baseline standard deviation`, flagged past
-1.0 baseline standard deviations - the numeric-feature drift check.
-Vocabulary and output drift are compared by raw percentage-point shift
-instead, the categorical-feature equivalent, since both are already rates/
-shares rather than a raw score distribution.
+1.0 baseline standard deviations. Vocabulary and output drift are compared
+by raw percentage-point shift instead, the categorical-signal equivalent,
+since both are already rates/shares rather than a raw score distribution.
 
 ```bash
 python -m monitoring.monitor --source drift_simulation
@@ -122,6 +190,17 @@ these checks can fire from pure sample noise on a handful of requests
 (found this by hand: two live test requests, one of each class, already
 swung the predicted-class share by 33 points) - so a small window is
 reported as a warning, not a retrain recommendation.
+
+**What doesn't justify retraining, even if it looks alarming in isolation:**
+
+- A single signal firing on a below-`MIN_WINDOW_SIZE` window - noise, not
+  evidence, per the point above.
+- One check sitting close to its threshold without crossing it (vocabulary
+  drift at +4.87pp, just under the +5pp bar, is a real example of this
+  project's own data) - close is not the same as fired.
+- A retrain decision made on a fixed schedule rather than a measured signal
+  - nothing in this project retrains on a calendar; `dvc repro --force
+  train_rnn` only ever runs because a check fired.
 
 ## The ground-truth problem
 
@@ -168,3 +247,11 @@ repro --force train_rnn`), or fairness/subgroup monitoring. Given evidence
 of drift, the response here is a clear, actionable report - not an
 autonomous action - which is the appropriate boundary for a project this
 size.
+
+Also out of scope: drift in `feature_store.db`'s own real numeric columns
+(`Reviewer_Score`, the two `Review_Total_*_Word_Counts` columns) measured
+*over time* - comparing today's feature store against an older,
+DVC-tracked snapshot of it. Not built because there's only ever been one
+snapshot to date (the one-time Kaggle pull); there's nothing yet to
+compare it against. Worth adding the moment the raw dataset is re-ingested
+and a second snapshot exists.
