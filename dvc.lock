@@ -45,14 +45,14 @@ stages:
     outs:
     - path: feature_store/feature_store.db
       hash: md5
-      md5: db2870e12c716fc5e340c87a90495ff6
+      md5: 9f0d8d893acd7843f19eee80a6bbb8bf
       size: 536072192
   vectorize:
     cmd: python -m features.vectorize
     deps:
     - path: feature_store/feature_store.db
       hash: md5
-      md5: db2870e12c716fc5e340c87a90495ff6
+      md5: 9f0d8d893acd7843f19eee80a6bbb8bf
       size: 536072192
     - path: features/vectorize.py
       hash: md5
@@ -69,7 +69,7 @@ stages:
       size: 155364798
     - path: model_store/tfidf_vectorizer_v1.pkl
       hash: md5
-      md5: 0a0fd926e83f1280afcf10cb81a32691
+      md5: 8a494c2ef7c0c9257b8c05c0c61a67a9
       size: 789709
   train:
     cmd: python -m training.train_linear

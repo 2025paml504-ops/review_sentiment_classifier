@@ -1,2 +1,4 @@
 [core]
     remote = localremote
+['remote "localremote"']
+    url = C:\path\to\dvc-storage
