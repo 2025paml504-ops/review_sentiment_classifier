@@ -30,7 +30,7 @@ df = df.dropna(subset=["clean_review", "sentiment"]).reset_index(drop=True)
 
 # Quick sanity check on a subsample first (full dataset takes ~7.5 hrs on MPS).
 # Set to None once you're ready to run on the full dataset.
-SAMPLE_SIZE = 100000
+SAMPLE_SIZE = 500000
 if SAMPLE_SIZE:
     df = df.sample(n=SAMPLE_SIZE, random_state=42).reset_index(drop=True)
 
