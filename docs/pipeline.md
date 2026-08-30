@@ -49,8 +49,13 @@ data/processed/train_v1.csv  +  model_store/tfidf_vectorizer_v1.pkl
    `model_store/tfidf_vectorizer_v1.pkl`. Exposes `build_tfidf_features()` →
    `X_train_vec, X_test_vec, y_train, y_test, vectorizer`.
 
-5. **Train** — reserved under `training/`; imports `build_tfidf_features()` from
-   `features.vectorize`.
+5. **Train** — `python -m training.run_experiment`
+   Split into pure logic (`training/train.py`: `load_data` / `build_model` /
+   `evaluate`) and MLflow orchestration (`training/run_experiment.py`, which loops
+   over the `EXPERIMENTS` config). Each config becomes one MLflow run — params,
+   metrics, per-run eval artifacts under `artifacts/<run>_<id>/`, and the fitted
+   model are logged to the SQLite store `mlflow.db`. View with
+   `./scripts/mlflow_ui.sh`. Add a model by appending to `EXPERIMENTS`.
 
 ## Schema contract
 
