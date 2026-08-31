@@ -1,0 +1,130 @@
+# ──────────────────────────────────────────────────────────────────
+# The whole ML lifecycle as services off ONE shared image
+# (review-sentiment/ml-pipeline), each differentiated by its `command`:
+#
+#   mlflow   long-running  experiment-tracking server (host 5001 -> 5000)
+#   trainer  one-shot      runs the pipeline, logs to mlflow, writes model
+#   api      long-running  FastAPI inference (:8000), reads the model
+#   monitor  one-shot      drift report over the prediction log
+#   ui       long-running  static page (nginx, :8090) - optional
+#
+# Artifacts are handed between services through named volumes:
+#   mlflow_data  -> /mlflow        (mlflow backend db + artifact root)
+#   model_store  -> /app/model_store (trainer writes; api/monitor read)
+# and the raw data is bind-mounted read-write so the pipeline can write its
+# intermediates (data/interim, data/processed, feature_store/*.db).
+#
+# Run order:
+#   docker compose up -d mlflow
+#   docker compose run --rm trainer
+#   docker compose up -d api ui
+#   docker compose run --rm monitor
+#
+# Logs: `docker compose logs -f <service>` (all services log to stdout/stderr).
+# ──────────────────────────────────────────────────────────────────
+
+services:
+
+  mlflow:
+    # Lean image (just mlflow, ~300 MB) so this starts fast - it doesn't need
+    # torch/transformers/dvc. Pinned to the same mlflow the trainer logs with.
+    build:
+      context: .
+      dockerfile: docker/mlflow.Dockerfile
+    image: review-sentiment/mlflow:1.0.0
+    container_name: rsc_mlflow
+    environment:
+      - MLFLOW_SERVER_ALLOWED_HOSTS=*
+    command: >
+      mlflow server
+      --host 0.0.0.0
+      --port 5000
+      --backend-store-uri sqlite:////mlflow/mlflow.db
+      --default-artifact-root /mlflow/artifacts
+    ports:
+      # Host 5001 -> container 5000. macOS Control Center / AirPlay Receiver
+      # occupies host 5000; the container port stays 5000 so the in-network
+      # MLFLOW_TRACKING_URI (http://mlflow:5000) is unaffected.
+      - "5001:5000"
+    volumes:
+      - mlflow_data:/mlflow
+    healthcheck:
+      test: ["CMD", "python", "-c",
+             "import urllib.request;urllib.request.urlopen('http://localhost:5000/health')"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    restart: unless-stopped
+
+  trainer:
+    build: .
+    image: review-sentiment/ml-pipeline:1.0.0
+    container_name: rsc_trainer
+    # Trains rnn_lstm and logs to mlflow; the model is written to the default
+    # model_store/ path (= /app/model_store), which is the shared volume, so the
+    # api and monitor read the same file. This default path is also dvc's declared
+    # output, so `dvc repro train_rnn` works here too.
+    command: python -m training.train_rnn
+    environment:
+      # 'mlflow' is the SERVICE NAME - Docker's internal DNS resolves it.
+      MLFLOW_TRACKING_URI: http://mlflow:5000
+      # No ARTIFACT_DIR anywhere: every service uses the code's default
+      # model_store/ path mounted from the shared volume - one consistent path.
+    volumes:
+      - ./data:/app/data              # raw CSV in, intermediates out (read-write)
+      - model_store:/app/model_store  # model lands here; api + monitor read it here too
+    depends_on:
+      mlflow:
+        condition: service_healthy
+
+  api:
+    build: .
+    image: review-sentiment/ml-pipeline:1.0.0
+    container_name: rsc_api
+    ports:
+      - "8000:8000"
+    environment:
+      # Every service uses /app/model_store (the code's default path and dvc's
+      # declared output) - no ARTIFACT_DIR divergence. Reads the model the
+      # trainer wrote into this same named volume.
+      PREDICTION_LOG: /app/model_store/predictions.db
+    volumes:
+      - model_store:/app/model_store  # same volume the trainer wrote to
+    healthcheck:
+      test: ["CMD", "python", "-c",
+             "import urllib.request;urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+    restart: unless-stopped
+
+  monitor:
+    build: .
+    image: review-sentiment/ml-pipeline:1.0.0
+    container_name: rsc_monitor
+    command: >
+      sh -c "python -m monitoring.simulate_drift && python -m monitoring.monitor --source api"
+
+    environment:
+      PREDICTION_LOG: /app/model_store/predictions.db
+    volumes:
+      - model_store:/app/model_store  # reads the model + the prediction log the api wrote
+
+  # Optional: the static UI, served by its own lean nginx image. Not one of the
+  # reference's four services - drop this block if you don't want it.
+  ui:
+    build:
+      context: ./ui
+    image: review-sentiment-ui
+    container_name: rsc_ui
+    ports:
+      - "8090:80"
+    depends_on:
+      - api
+    restart: unless-stopped
+
+volumes:
+  mlflow_data:   # survives `docker compose down`
+  model_store:   # the handoff point between trainer, api and monitor

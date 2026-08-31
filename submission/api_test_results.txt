@@ -1,0 +1,19 @@
+API test results - Hotel Review Sentiment Classifier API
+Run at: 2026-08-24T10:59:05
+Target: http://127.0.0.1:8000
+Each check below is a live assertion against the running API - status codes
+and response shape, matching the curl examples in serving/README.md.
+
+Result: 11/11 checks passed
+
+[PASS] Health check - status code is 200  (got 200)
+[PASS] Health check - model is loaded  (status='ok')
+[PASS] Health check - reports a model_version  (keys=['status', 'model', 'model_version', 'model_path'])
+[PASS] Predict positive - status code is 200  (got 200)
+[PASS] Predict positive - sentiment is POSITIVE  (sentiment='POSITIVE')
+[PASS] Predict positive - confidence is between 0 and 1  (confidence=0.9988303780555725)
+[PASS] Predict negative - status code is 200  (got 200)
+[PASS] Predict negative - sentiment is NEGATIVE  (sentiment='NEGATIVE')
+[PASS] Predict negative - confidence is between 0 and 1  (confidence=0.9977942705154419)
+[PASS] Predict blank text - status code is 422  (got 422)
+[PASS] Predict blank text - response includes a validation detail  (keys=['detail'])

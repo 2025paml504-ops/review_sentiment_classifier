@@ -2,129 +2,212 @@
 
 [← Design docs](README.md) · Related: [Architecture](architecture.md) · [Pipeline](../pipeline.md) · [Versioning](../versioning.md)
 
-Lightweight ADR-style records of the key choices behind the pipeline. Each entry
-gives the **context**, the **decision**, the **rationale**, and the
-**alternatives** considered, so future changes can be made deliberately.
+Lightweight ADR-style records of the key choices behind the pipeline: what
+was decided, and why.
+
+## At a glance
+
+| # | Decision | Why |
+|---|---|---|
+| [1](#1-text-cleaning--tokenization) | Clean text with plain regex, de-duplicate first, merge review fields into one document | Keeps negation ("not good") visible as a feature; no extra dependencies |
+| [2](#2-sentiment-labeling--vader-binary) | Label sentiment with VADER on the review text, binary NEGATIVE/POSITIVE | Text-derived labels match what the review actually says |
+| [3](#3-tf-idf-fit-on-train-only) | TF-IDF features, fit on the train split only, after a stratified split | Fast, cheap, interpretable; no test-vocabulary leakage |
+| [4](#4-feature-storage--sqlite--csvjson) | SQLite feature store; interim data as CSV with tokens as JSON | No server needed; no Parquet dependency |
+| [5](#5-schema-contract-as-json) | Expected columns/dtypes live in a JSON file, not code | A schema change becomes a one-line edit |
+| [6](#6-versioning-with-dvc) | Data/artifacts versioned with DVC; git holds only pointers | Too large for git; a commit hash still pins an exact version |
+| [7](#7-four-models-trained-rnn_lstm-served) | Four models trained (logreg, linear_svc, RNN/LSTM, BERT-tiny); `rnn_lstm` served | Wins on macro-F1 by a clear margin (0.8918 vs. next-best 0.8652) |
+| [8](#8-macro-f1-headline-metric--class-weighting) | Macro-F1 is the headline metric; all four models weight the rare class | Accuracy hides poor performance on the small class; weighting measurably helps it |
+| [9](#9-mlflow-experiment-tracking) | Every run logs settings, scores, environment, and a hypothesis/conclusion pair | Makes any past run reproducible and comparable from its own record |
+| [10](#10-tuning-alternatives-considered-and-not-adopted) | A record of every measured alternative to the current config that wasn't adopted | Stops the same dead end from being tried again by accident |
+| [11](#11-plain-html-ui-no-framework) | `ui/index.html` is one plain HTML/CSS/JS file, no framework | One form, one API call - too simple to need framework overhead |
+| [12](#12-monitoring-drift-simulation-and-retraining-triggers) | Every prediction is logged; drift is simulated; four signals decide when to recommend retraining | Drift set shows a real, measured macro-F1 drop (0.8918 → 0.7600) |
+| [13](#13-api-failure-handling-and-contract-change-policy) | Missing model fails soft (`503`, not a crash); new fields ship optional before required | A caller can tell "broken" from "not ready"; no existing caller can be broken |
 
 ---
 
 ## 1. Text cleaning & tokenization
 
-**Context.** Reviews are free text with a positive and a negative half; the
-Booking dataset inserts placeholder strings (`No Positive` / `No Negative`) when
-a half is blank.
+**Decision.** `features/build_features.py`: merge `Positive_Review` +
+`Negative_Review` into one `full_review` field; de-duplicate on
+`[full_review, Reviewer_Score]` first; then lowercase, expand contractions,
+strip placeholder text, and attach negators to the next word
+(`not_good`). `validation/diagnose_cleaning.py` reports known defect
+counts on demand, kept off the DVC DAG.
 
-**Decision.** In `features/build_features.py`: lowercase → strip the
-`no positive` / `no negative` placeholder phrases → replace every non-letter
-(digits, punctuation, specials) with a space → collapse whitespace → tokenize by
-whitespace split.
+**Why.** Dependency-light (stdlib `re` only) and keeps negation visible as
+a real feature instead of losing it to punctuation stripping.
+De-duplicating first avoids wasted cleaning passes on rows that get
+dropped anyway.
 
-**Rationale.** Dependency-light (stdlib `re` only), keeps clean alphabetic tokens
-that suit a bag-of-words / TF-IDF model, and removes dataset-artifact noise that
-would otherwise become features.
+## 2. Sentiment labeling — VADER, binary
 
-**Alternatives.** Stopword removal — skipped (adds an NLTK dependency/download;
-TF-IDF's `idf` already down-weights common words). Lemmatization/stemming —
-deferred as unnecessary for a first baseline.
+**Decision.** Sentiment comes from VADER's compound score on `full_review`
+(`compound >= 0.0` → POSITIVE, else NEGATIVE, `features/build_features.py`),
+not from `Reviewer_Score`. 86.5% / 13.5% POSITIVE/NEGATIVE split.
 
-## 2. Combine positive + negative into `full_review`
+**Why.** Text-derived labels describe what the review actually says; a
+numeric-score threshold can disagree with the text (an 8.8-scored review
+reading "staff rude unhelpful money grabbers"). VADER's `0.0` cutoff is its
+own built-in zero-point, not tuned to hit a target balance.
 
-**Context.** Each row has two text fields but we want a single sentiment target.
+## 3. TF-IDF, fit on train only
 
-**Decision.** Concatenate `Positive_Review` + `Negative_Review` into one
-`full_review` field (then clean into `clean_review`).
+**Decision.** `TfidfVectorizer` (20,000 features, bigrams, `min_df=5`,
+`features/vectorize.py`), fit on the train split only, after a stratified
+train/test split.
 
-**Rationale.** One document per review is the natural unit for a single
-per-review sentiment label and a single TF-IDF vector.
-
-## 3. Sentiment labeling — Scheme A
-
-**Context.** The dataset has a numeric `Reviewer_Score` (2.5–10.0) but no
-explicit sentiment label.
-
-**Decision.** Derive a 3-class label by thresholding the score (**Scheme A**):
-`NEGATIVE < 6`, `6 ≤ NEUTRAL < 8`, `POSITIVE ≥ 8` (`features/build_features.py`).
-
-**Rationale.** Produces the least-imbalanced split observed (~10% / 25% / 65%),
-leaving a large-enough NEGATIVE class to learn.
-
-**Alternatives.** Schemes B/C (higher cutoffs) left <5% negatives — too few to
-train a usable NEGATIVE class. Thresholds are single-source constants, so a
-future scheme is a one-line change (bump the artifact version — see
-[Versioning](../versioning.md)).
-
-## 4. TF-IDF over embeddings
-
-**Context.** Need numeric features from `clean_review` for a classifier.
-
-**Decision.** `TfidfVectorizer` with `max_features=20000`, `ngram_range=(1,2)`,
-`min_df=5`, `sublinear_tf=True` (`features/vectorize.py`).
-
-**Rationale.** A strong, cheap, interpretable classical baseline — no GPU, fast to
-fit on ~515k rows, and easy to reason about. Bigrams + `min_df` capture short
-phrases while pruning rare noise.
-
-**Alternatives.** Transformer embeddings (e.g. sentence-transformers) — heavier
-(model download, compute) and deferred until the baseline is established.
-
-## 5. Fit on train only + stratified split
-
-**Context.** Vectorizing before splitting would leak test-set vocabulary/IDF into
+**Why.** Fast, cheap, interpretable baseline - no GPU needed. Fitting
+after splitting prevents test-set vocabulary/IDF from leaking into
 training features.
 
-**Decision.** `train_test_split(..., stratify=y)` first, then `fit_transform` the
-vectorizer on **train only** and `transform` the test split.
+## 4. Feature storage — SQLite + CSV/JSON
 
-**Rationale.** Prevents leakage (honest evaluation) and stratification preserves
-the imbalanced class ratios in both splits.
+**Decision.** The feature store is SQLite (`feature_store/feature_store.db`).
+The interim CSV stores `tokens` as a JSON-encoded string.
 
-## 6. Feature store = SQLite
+**Why.** SQLite needs no server and zero setup. JSON round-trips a token
+list cleanly through both CSV and SQLite without adding a Parquet
+dependency.
 
-**Context.** Need somewhere to materialize features; MySQL was requested but no
-server was available locally.
+## 5. Schema contract as JSON
 
-**Decision.** SQLite via SQLAlchemy (`feature_store/feature_store.db`, table
-`hotel_review_features`).
+**Decision.** Expected columns and dtypes live in
+`validation/feature_column.json`, loaded at runtime by
+`validation/validate_data.py`.
 
-**Rationale.** Serverless and file-based (zero setup), browsable in PyCharm's
-Database tool, and one connection-string away from MySQL if we migrate later.
+**Why.** The schema is data, not code - adding or renaming a validated
+column is a one-line edit.
 
-**Alternatives.** MySQL — needs a running server (none available); Docker/Homebrew
-setup was heavier than warranted for this stage.
+## 6. Versioning with DVC
 
-## 7. Interim as CSV, tokens as JSON string
+**Decision.** Data and model artifacts are versioned with DVC (`dvc.yaml`
+DAG + `dvc.lock`); git holds only pointers/hashes.
 
-**Context.** Need a rebuildable intermediate artifact carrying a token **list** per row.
+**Why.** The dataset and artifacts total ~1.3 GB, too large for git, and a
+git commit still needs to pin an exact, reproducible data version.
 
-**Decision.** Write `data/interim/features_clean.csv` (CSV) and store `tokens` as a
-JSON-encoded string.
+## 7. Four models trained, `rnn_lstm` served
 
-**Rationale.** No new dependency (`pyarrow` is not installed), and a JSON string
-round-trips cleanly through both CSV and SQLite.
+**Decision.** `train_linear.py` trains `logreg` (default,
+`class_weight="balanced"`) and `linear_svc` (calibrated, its own DVC
+stage). `train_rnn.py` trains an RNN/LSTM from scratch on its own word
+vocabulary. `train_transformer.py` fine-tunes BERT-tiny
+(`google/bert_uncased_L-2_H-128_A-2`, ~4.4M params - the only checkpoint
+size practical to train fully on CPU here, §10). `serving/app.py`
+(FastAPI) serves `rnn_lstm`, with `model_version` and a bounded
+`confidence` (`Field(ge=0.0, le=1.0)`) on every response.
 
-**Alternatives.** Parquet — preserves list columns natively but adds a `pyarrow`
-dependency; not worth it here.
+| Model | macro-F1 | accuracy | ROC-AUC |
+|---|---|---|---|
+| **`rnn_lstm`** | **0.8918** | 0.9434 | — |
+| `linear_svc` (calibrated) | 0.8652 | 0.9412 | 0.9671 |
+| `bert_tiny` | 0.8519 | 0.9208 | 0.9704 |
+| `logreg` | 0.8358 | 0.9073 | 0.9690 |
 
-## 8. Schema contract as JSON
+**Why.** `rnn_lstm` wins on macro-F1 (§8) by a clear margin, driven by
+NEGATIVE-class recall (0.9324 vs. 0.70-0.91 for the others, §8) - reading
+word order matters more here than `bert_tiny`'s pretrained knowledge or
+`linear_svc`'s narrow accuracy edge. The root `Dockerfile` packages the API
+with a scoped `serving/requirements.txt` (`torch` only, no
+`transformers`/`mlflow`/`dvc`), since `rnn_lstm` needs none of them to
+serve.
 
-**Context.** Validation needs to know the expected columns and dtypes.
+## 8. Macro-F1 headline metric + class weighting
 
-**Decision.** Externalize the contract to `validation/feature_column.json`, loaded
-at runtime by `validation/validate_data.py`.
+**Decision.** Macro-F1, not accuracy, is the main score. All four models
+weight the rare NEGATIVE class during training (`class_weight="balanced"`
+for the linear models, a weighted loss for the RNN and transformer).
 
-**Rationale.** The schema is *data, not code* — adding or renaming a validated
-column is a one-line JSON edit with no code change.
+**Why.** The data is 86.5%/13.5% imbalanced (§2), so accuracy alone can
+look good while ignoring the small class - macro-F1 can't be inflated that
+way. Weighting measurably helps: NEGATIVE recall is 0.70-0.93 across the
+four weighted models, versus 0.67 for `logreg` run unweighted (§10).
 
-## 9. Versioning with DVC
+## 9. MLflow experiment tracking
 
-**Context.** Datasets/artifacts total ~1.3 GB — too large for git — and versions
-must be reproducible.
+**Decision.** Every run (`training/tracking.py`) logs its parameters,
+metrics, model/confusion-matrix files, a `pip freeze` snapshot, the git
+commit and dirty flag, a feature-store hash, and a hypothesis/conclusion
+pair - stored locally in `mlflow.db`. `training/compare_runs.py` prints a
+ranked leaderboard.
 
-**Decision.** Track data/artifacts with DVC (`dvc.yaml` DAG + `dvc.lock`), backed
-by a local remote; git holds only pointers/hashes.
+**Why.** DVC (§6) tracks which data went in; MLflow tracks which settings
+and code produced a given score. Standardizing what every run logs is what
+makes different models comparable at all.
 
-**Rationale.** Reproducible (`dvc repro`), git-friendly, and fully open source; a
-git commit pins an exact dataset version.
+## 10. Tuning alternatives considered and not adopted
 
-**Alternatives.** Filename-only `_vN` convention — human-readable but not
-reproducible or content-addressed; kept as a *label* layered on top of DVC.
+**Context.** Every row is a real, measured alternative to the current
+config, judged by macro-F1 (§8) - kept on record so a rejected idea isn't
+retried by accident.
+
+| Alternative | Result | Current default |
+|---|---|---|
+| TF-IDF: 30,000 features, trigrams | `saga` didn't converge; macro-F1 0.537 | 20,000 features, bigrams (§3) |
+| TF-IDF: 24,000 features, bigrams | Still non-convergent; macro-F1 0.556 | 20,000 features, bigrams (§3) |
+| RNN epochs: 3 vs. 4 vs. 6 | 3 wins every time (0.6488 vs. 0.6334 vs. 0.6438), deterministically | 3 epochs |
+| Transformer input: raw `full_review` vs. `clean_review` | 0.6459 vs. 0.6461 - a wash | `clean_review` |
+| `linear_svc` + `CalibratedClassifierCV` | Accuracy up, macro-F1 down (0.6225→0.6049) | Kept as a serving candidate, not selected (§7) |
+| Transformer: `distilbert-base-uncased` (~66M params) | ~20+ hours/epoch extrapolated on CPU | BERT-tiny (~4.4M params, §7) |
+| `logreg` without class weighting | NEGATIVE recall 0.6698, vs. 0.70-0.93 weighted (§8) | `class_weight="balanced"` |
+
+## 11. Plain HTML UI, no framework
+
+**Decision.** `ui/index.html` is one self-contained HTML/CSS/JS file - a
+text box, an Analyze button, a result view. `serving/app.py` enables CORS
+so the UI (a different local port) can call the API directly.
+
+**Why.** One form talking to one API endpoint doesn't need a framework's
+complexity - open the file and it works, nothing to install or compile.
+
+## 12. Monitoring, drift simulation, and retraining triggers
+
+**Decision.** Full design: [Monitoring & retraining](../monitoring.md).
+Every prediction is logged to SQLite (`monitoring/prediction_log.py`); a
+training-time baseline is recorded once (`monitoring/baseline.py`, now a
+DVC stage - see below); a 30-review, hand-labeled modern-slang set
+simulates unfamiliar-vocabulary traffic (`monitoring/simulate_drift.py`);
+`monitoring/monitor.py` checks four signals against the baseline -
+vocabulary drift and confidence/output drift (label-free, warn early) and
+macro-F1 drop (the direct signal, but only computable with true labels) -
+and recommends retraining only on measured evidence, never a fixed
+schedule. The monitor reports; it doesn't retrain or redeploy
+automatically - `dvc repro --force train_rnn` stays a manual step,
+matching this project's preference for locally-runnable tools over
+heavier automation (§4, §9).
+
+**Why.** The API returns a valid `200` and a normal-range confidence even
+when predictions have drifted - nothing in the response format changes, so
+catching it needs active comparison against a baseline. On the drift set,
+macro-F1 falls to 0.7600 from a 0.8918 baseline, and two of the four
+signals fire.
+
+**Why only `baseline` is a DVC stage, not `simulate_drift`/`monitor`.**
+DVC's model is a reproducible build: given fixed inputs, always produce
+the same cached output, only rerun when a dependency's hash changes.
+`baseline.py` fits exactly - given a fixed `rnn_lstm_v1.pt` and a fixed
+`test_v1.csv`, it always produces the same `baseline.json`, so it's a
+stage that auto-reruns whenever a retrain produces a new model.
+`monitor.py`, especially `--source api`, doesn't fit that shape at all -
+it depends on `predictions.db`, which grows continuously as real requests
+arrive, and its whole purpose is answering "how does traffic look right
+now," on demand, not producing a cacheable build artifact. Forcing it into
+the DVC DAG would be modeling a live, ever-changing check as a one-time
+reproducible build, which it isn't. `simulate_drift.py` is deterministic
+enough that it could go either way, but its purpose is exploratory
+("try this against the model"), not something else in the pipeline
+depends on - left as a script, not a stage, for that reason alone.
+
+## 13. API failure handling and contract-change policy
+
+**Decision.** A missing model file at startup fails soft: `serving/app.py`
+keeps running with `_model = None`, `/health` reports `"model_not_loaded"`,
+and `/predict` returns `503`, not `500`. A new contract field ships
+optional first; it only becomes required in a new versioned endpoint
+(e.g. `/v2/predict`).
+
+**Why.** `503` ("temporarily unavailable") is the accurate meaning here,
+versus `500`'s "something broke unexpectedly" - a caller can tell the two
+apart. A required field added immediately would turn every existing
+caller's next request into an unexpected `422`; optional-first is the only
+change that can't break anyone already depending on the current shape.

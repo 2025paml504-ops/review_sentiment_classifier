@@ -1,0 +1,44 @@
+# The image (Dockerfile does `COPY . .`) needs all the project's Python source,
+# the pinned requirements.txt, and the DVC config - but none of the bulk or
+# generated files below. data/ and the trained model are provided at runtime
+# via volumes, not baked in.
+
+# VCS / tooling / envs
+.git/
+.gitignore
+.idea/
+.venv/
+venv/
+**/__pycache__/
+*.pyc
+
+# DVC cache (2.4 GB) - config is kept, the cache is not
+.dvc/cache/
+.dvc/tmp/
+
+# Data: 227 MB raw CSV + intermediates, bind-mounted at /app/data instead
+data/
+
+# Generated artifacts / logs / experiment tracking output. The image bakes NO
+# model weights - the model arrives at runtime via the model_store volume - so
+# exclude model dirs at ANY depth (plain `model_store/` matches only the root,
+# NOT training/model_store/ which holds ~112 GB of transformer checkpoints) plus
+# all weight files as a backstop.
+artifacts/
+metrics/
+**/model_store/
+**/*_checkpoints/
+**/*.safetensors
+**/*.pt
+**/*.ckpt
+mlruns/
+mlartifacts/
+**/*.db
+
+# The UI is served by its own nginx container (ui/Dockerfile), not this image
+ui/
+
+# Docs and submission material - not needed at runtime
+docs/
+submission/
+*.docx

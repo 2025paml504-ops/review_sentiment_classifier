@@ -1,0 +1,118 @@
+INFO: ============================================================
+INFO: RETRAIN RECOMMENDED - triggered by: output_balance_drift, performance_drop
+
+============================================================
+NUMERIC SIGNAL DRIFT REPORT
+============================================================
+
+  Signal           : confidence
+  Baseline mean    : 0.9532  (std 0.1021)
+  Window mean      : 0.9105
+  Normalised shift (sigma): 0.4183   [Stable]
+
+  Signal           : token_count
+  Baseline mean    : 33.4862  (std 37.2585)
+  Window mean      : 16.0333
+  Normalised shift (sigma): 0.4684   [Stable]
+
+  Signal           : oov_token_count
+  Baseline mean    : 0.2492  (std 0.7403)
+  Window mean      : 0.9000
+  Normalised shift (sigma): 0.8792   [Stable]
+
+============================================================
+CATEGORICAL SIGNAL DISTRIBUTION
+============================================================
+
+  Signal: sentiment
+    POSITIVE              66.7%
+    NEGATIVE              33.3%
+
+  Signal: source
+    drift_simulation     100.0%
+
+============================================================
+CONFIDENCE SCORE DISTRIBUTION
+============================================================
+  LOW (<0.60)                 3.3%
+  MEDIUM (0.60-0.85)         13.3%
+  HIGH (>0.85)               83.3%
+
+{
+  "source": "drift_simulation",
+  "n_predictions": 60,
+  "below_min_window": false,
+  "checks": {
+    "confidence_drift": {
+      "window_mean_confidence": 0.9105,
+      "baseline_mean_confidence": 0.9532,
+      "baseline_std_confidence": 0.1021,
+      "z_score": 0.4183,
+      "triggered": false
+    },
+    "oov_drift": {
+      "window_oov_rate": 0.0561,
+      "baseline_oov_rate": 0.0074,
+      "delta": 0.0487,
+      "triggered": false
+    },
+    "output_balance_drift": {
+      "window_positive_share": 0.6667,
+      "baseline_positive_share": 0.8263,
+      "delta": -0.1597,
+      "triggered": true
+    },
+    "performance_drop": {
+      "n_labeled": 60,
+      "accuracy": 0.7667,
+      "macro_f1": 0.76,
+      "trained_macro_f1": 0.8918,
+      "drop": 0.1318,
+      "triggered": true
+    }
+  },
+  "retrain_recommended": true,
+  "triggered_by": [
+    "output_balance_drift",
+    "performance_drop"
+  ],
+  "low_confidence_triggers": []
+}
+
+--------------------------------------------------------------------------
+Added explanation (not part of the raw command output above) - how each
+"triggered" value was actually decided. Straight from monitoring/monitor.py:
+each check computes one number, then compares it against a fixed threshold.
+
+| Check                 | Rule (exact code)      | Plugged in                | Result |
+|------------------------|-------------------------|----------------------------|--------|
+| confidence_drift       | z_score > 1.0           | 0.4183 > 1.0               | False  |
+| oov_drift               | delta >= 0.05           | 0.0487 >= 0.05             | False  |
+| output_balance_drift   | abs(delta) >= 0.10      | abs(-0.1597) >= 0.10       | True   |
+| performance_drop       | drop >= 0.05            | 0.1318 >= 0.05             | True   |
+
+Note: oov_drift and performance_drop are one-directional - "delta" and
+"drop" are NOT wrapped in abs(), so they only fire if the number moved the
+"bad" way (vocabulary rate going up, or macro-F1 going down). Only
+output_balance_drift uses abs(), so it fires whether the POSITIVE share
+swings up or down by 10+ points - there's no inherently "good" direction
+for the output mix to move, so either direction counts as suspicious.
+
+The NUMERIC SIGNAL DRIFT REPORT above (confidence, token_count,
+oov_token_count) is descriptive only - a per-signal z-score shown for
+context, not itself one of the four triggers. It uses the same >1.0
+sigma cutoff as confidence_drift, which is why confidence appears in both
+sections with the same shift value.
+
+These are called "signals," not "features," deliberately: none of them
+are columns in feature_store/feature_store.db. That table's real numeric
+feature columns (Reviewer_Score, the two Review_Total_*_Word_Counts
+columns) can't be used here - a live /predict request only ever sends raw
+text, never the pre-split review halves or score those columns depend on,
+so there's no live value to compare against a baseline for them. Token
+count and OOV count stand in instead, since they're the only numeric
+quantities computable identically from both the baseline text and a live
+request's text.
+
+Full explanation of what each signal means and why its threshold is set
+where it is: docs/monitoring.md.

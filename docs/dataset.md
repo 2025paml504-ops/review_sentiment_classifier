@@ -8,9 +8,12 @@
   across European hotels (17 raw columns).
 - Stored locally at `data/raw/Hotel_Reviews.csv` (~238 MB).
 - The raw file is **large and not committed to git**. It is tracked by DVC
-  (`data/raw/Hotel_Reviews.csv.dvc`). Get it one of two ways:
+  (`data/raw/Hotel_Reviews.csv.dvc`). Get it one of three ways:
   - `dvc pull` if you have access to the DVC remote (see [Versioning](versioning.md)), or
-  - download it from Kaggle and place it at `data/raw/Hotel_Reviews.csv`.
+  - `python -m data_ingestion.download_data` (added 11-Aug), which pulls it via
+    the Kaggle API (needs a configured `kaggle.json` credential) and reports
+    the resulting size/row/column count — a no-op if the file's already there, or
+  - download it from Kaggle by hand and place it at `data/raw/Hotel_Reviews.csv`.
 
 ## Data layers
 

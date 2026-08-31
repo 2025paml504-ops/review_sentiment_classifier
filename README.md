@@ -1,12 +1,28 @@
 # review_sentiment_classifier
 
-
 A sentiment classifier for hotel reviews. A travel e-commerce platform wants to
-automatically classify incoming hotel-review text by sentiment into three
-classes: **NEGATIVE**, **NEUTRAL**, and **POSITIVE**.
+automatically classify incoming hotel-review text by sentiment into two
+classes: **NEGATIVE** and **POSITIVE**.
 
 Built on an all-open-source stack: `pandas`, `SQLAlchemy` (SQLite),
-`scikit-learn`, and `DVC` for data/artifact versioning.
+`scikit-learn`, `DVC` for data/artifact versioning, `MLflow` for experiment
+tracking, and `PyTorch`/`transformers` for the recurrent and transformer models.
+
+## Evaluator quick links
+
+Everything the submission checklist asks for, mapped to exactly where it lives
+in this repository. The raw files under `submission/` are real command
+output, not prose - if any of them are unclear on their own,
+[`submission/README.md`](submission/README.md) explains what each one is
+and how to read it before you open the raw data:
+
+| # | Deliverable | Where to look |
+|---|---|---|
+| 1 | Versioned pipeline, commit history | [`dvc.yaml`](dvc.yaml) — pipeline stages<br>[`dvc.lock`](dvc.lock) — pinned versions<br>Commit history (GitHub "Commits" tab) |
+| 2 | Experiment tracking & model comparison | [Decisions §7](docs/design/decisions.md#7-four-models-trained-rnn_lstm-served) — comparison table<br>[Model leaderboard](docs/model_leaderboard.md)<br>[MLflow tracking write-up](submission/MLflow%20Experiment%20Tracking%20-%20What%20Was%20Done.docx) — real screenshots + exported run data |
+| 3 | Deployed API, sample request/response | [`serving/app.py`](serving/app.py) — the API<br>[`serving/README.md`](serving/README.md) — curl commands + real sample responses<br>[`api_test_results.txt`](submission/api_test_results.txt) — 11/11 checks passed against the live API |
+| 4 | Monitoring log, drift report, retraining trigger design | [Monitoring & retraining](docs/monitoring.md) — design + signals<br>[`submission/README.md`](submission/README.md) — **explains what the two files below actually are**<br>[`drift_monitor_report.txt`](submission/drift_monitor_report.txt) — full `monitor.py` output, incl. retrain verdict<br>[`predictions_log.csv`](submission/predictions_log.csv) — exported prediction log |
+| 5 | README, architecture diagram, demo | This file<br>[Architecture](docs/design/architecture.md)<br>[Decisions](docs/design/decisions.md) — why each choice was made<br>Demo — delivered separately |
 
 ## Quick start
 
@@ -19,8 +35,96 @@ python3 -m venv .venv
 .venv/bin/dvc repro
 ```
 
+**Windows (PowerShell)**: `.venv/bin/...` is the macOS/Linux venv layout; on
+Windows the same virtual environment uses a `Scripts\` folder instead. Either
+prefix every command with `.venv\Scripts\` (e.g. `.venv\Scripts\pip install
+-r requirements.txt`), or activate the environment once and drop the prefix
+for the rest of the session:
+
+```powershell
+python -m venv .venv
+.venv\Scripts\Activate.ps1
+pip install -r requirements.txt
+```
+
+If activation is blocked with an execution-policy error, run this once (as
+your own user, not admin), then retry `Activate.ps1`:
+
+```powershell
+Set-ExecutionPolicy -Scope CurrentUser RemoteSigned
+```
+
 `dvc repro` runs the pipeline stages in dependency order and skips anything
-already up-to-date.
+already up-to-date. The pipeline trains four models; `train_rnn` - a fast
+stage - produces `rnn_lstm`, the model `serving/` actually uses. Run
+`dvc repro train_rnn` to stop there instead of running all four.
+
+Then, to run the API and the UI (needs `rnn_lstm` from the step above):
+
+```bash
+# one terminal
+.venv/bin/uvicorn serving.app:app --reload --port 8000
+
+# a second terminal
+.venv/bin/python3 -m http.server 8090 --directory ui
+```
+
+Open `http://localhost:8090/index.html`. Details: [serving/README.md](serving/README.md).
+
+Or run the whole lifecycle in containers - `mlflow` (5001), a one-shot
+`trainer`, the `api` (8000), a one-shot `monitor`, and an optional `ui` (8090),
+all off one shared image:
+
+```bash
+docker compose up -d mlflow
+docker compose run --rm trainer      # trains + logs; writes the model to a volume
+docker compose up -d api ui
+docker compose run --rm monitor
+```
+
+Details: [serving/README.md](serving/README.md#with-docker-compose-full-lifecycle).
+
+Alongside that, `http://127.0.0.1:8000/docs` (Swagger UI) gives an
+interactive, always-accurate view of the API itself - generated directly
+from `serving/app.py`, useful for testing requests/responses without
+needing `curl` or the UI page.
+
+To see the training side - every run's parameters, metrics, and tags, not
+just the served model - open MLflow's own UI:
+
+```bash
+.venv/bin/mlflow ui --backend-store-uri sqlite:///mlflow.db
+```
+
+Then open `http://127.0.0.1:5000`. This is a separate thing from the
+sentiment API above: it shows past *training* runs (`logreg`, `linear_svc`,
+`rnn_lstm`, `bert_tiny`, all under the `review_sentiment` experiment), not
+live predictions.
+
+Every prediction the API serves is logged automatically. To check whether
+that traffic still looks like the training data, or a hand-labeled
+modern-slang set built to simulate drift:
+
+```bash
+curl http://127.0.0.1:8000/health                 # confirm the API is up
+.venv/bin/python3 -m monitoring.baseline          # record what "normal" looks like (run once, or after any retrain)
+.venv/bin/python3 -m monitoring.simulate_drift    # generate traffic - score a hand-labeled, modern-slang review set
+.venv/bin/python3 -c "from monitoring import prediction_log; print(prediction_log.read_predictions(source='drift_simulation').to_string())"  # confirm it was logged
+.venv/bin/python3 -m monitoring.monitor --source drift_simulation   # check for drift + a retraining recommendation
+```
+
+The same steps work against real traffic instead of the simulated set - send
+a few requests through the UI or `/predict` first, then swap
+`drift_simulation` for `api`:
+
+```bash
+.venv/bin/python3 -c "from monitoring import prediction_log; print(prediction_log.read_predictions(source='api').to_string())"
+.venv/bin/python3 -m monitoring.monitor --source api
+```
+
+Details, the four retraining-trigger signals, and the measured results:
+[Monitoring & retraining](docs/monitoring.md) and
+[Decisions §12](docs/design/decisions.md).
 
 ## Repository layout
 
@@ -28,25 +132,110 @@ already up-to-date.
 |------------------|------------------------------------------------------------------|
 | `data/raw/`      | Immutable source data (`Hotel_Reviews.csv`)                      |
 | `data/interim/`  | Cleaned/labeled, rebuildable intermediate (`features_clean.csv`) |
-| `data/processed/`| Model-ready splits (`train_v1.csv`)                              |
+| `data/processed/`| Model-ready splits (`train_v1.csv`, `test_v1.csv`)               |
 | `features/`      | Feature engineering (`build_features.py`, `vectorize.py`)        |
 | `validation/`    | Data-quality checks + JSON schema contract                       |
 | `feature_store/` | SQLite feature store (`feature_store.db`)                        |
-| `model_store/`   | Persisted model artifacts (`tfidf_vectorizer_v1.pkl`)            |
-| `training/`      | Reserved for the model trainer (consumes the TF-IDF features)    |
-| `serving/`, `ui/`| Reserved for serving and UI                                      |
+| `model_store/`   | Persisted model artifacts, one set per trained model              |
+| `training/`      | Four trainers, MLflow tracking (`tracking.py`), leaderboard (`compare_runs.py`) |
+| `mlflow.db`, `mlruns/` | Local MLflow tracking store (git-ignored, regenerable)  |
+| `serving/`       | FastAPI REST API (`/health`, `/predict`) serving `rnn_lstm`; `Dockerfile` at repo root packages it |
+| `ui/`            | Static page (`index.html`) that calls the serving API and shows the result |
+| `monitoring/`    | Prediction logging, drift simulation, and retraining-trigger checks (`prediction_log.py`, `baseline.py`, `simulate_drift.py`, `monitor.py`) |
 
 ## Documentation
 
+**New here? Read in this order:** this README → [Versioning](docs/versioning.md)
+(what `1.3` means) → [Pipeline](docs/pipeline.md) (the stages, MLflow
+tracking, and reproducibility, before running `dvc repro`) →
+[Dataset](docs/dataset.md) (getting the raw CSV) →
+[Model leaderboard](docs/model_leaderboard.md) (current scores) →
+[Decisions](docs/design/decisions.md) (why each choice was made, read last —
+this is the deep dive, not required just to run the pipeline).
+
 - **[Dataset](docs/dataset.md)** — source (Kaggle 515K) and the raw/interim/processed data layers.
-- **[Pipeline](docs/pipeline.md)** — the DVC DAG, each stage in detail, and the schema contract.
-- **[Versioning](docs/versioning.md)** — how DVC versions data/artifacts, the remote, and cutting a new version.
+- **[Pipeline](docs/pipeline.md)** — the DVC DAG, each stage in detail, the schema contract, MLflow experiment tracking, and reproducibility (fixed seeds, dataset snapshots, logged parameters).
+- **[Versioning](docs/versioning.md)** — how DVC versions data/artifacts and cutting a new version.
+- **[Monitoring & retraining](docs/monitoring.md)** — prediction logging, the drift simulation and its measured results, and the four retraining-trigger signals.
 - **[Contributing](docs/contributing.md)** — prerequisites, code conventions, common-task recipes, and the pre-commit checklist.
 - **[Design](docs/design/README.md)** — architecture guide and the decision-making guide (why cleaning, sentiment thresholds, TF-IDF, SQLite, DVC, …).
 
 ## Status / roadmap
 
-The data → features → feature store → TF-IDF pipeline is complete. `training/`,
-`serving/`, and `ui/` are reserved for the next tasks (model training, API
-serving, and UI).
+Data -> features -> feature store -> TF-IDF -> four trained models
+(`logreg`, `linear_svc`, `rnn_lstm`, `bert_tiny`) -> compared on macro-F1
+-> tracked in MLflow. [Decisions §7](docs/design/decisions.md) (models)
+-> [§10](docs/design/decisions.md) (tuning alternatives considered and not adopted).
 
+`serving/` and `ui/` are now both built — see [serving/README.md](serving/README.md)
+and [Decisions §7, §11](docs/design/decisions.md).
+
+Prediction logging, a drift simulation, and retraining-trigger checks are
+also built — see [Monitoring & retraining](docs/monitoring.md) and
+[Decisions §12](docs/design/decisions.md).
+
+## Model Serving API
+
+### Endpoint: POST /predict
+
+**Request Schema:**
+
+| Field | Type | Constraints |
+|---|---|---|
+| text | str | 1-5000 characters, must not be blank/whitespace-only |
+
+**Response Schema:**
+
+| Field | Type | Notes |
+|---|---|---|
+| sentiment | str | `NEGATIVE` or `POSITIVE` |
+| confidence | float | 0.0-1.0, the winning class's probability |
+| probabilities | dict[str, float] | Both classes' probabilities, always sums to ~1.0 |
+| latency_ms | float | How long this request took to score, server-side |
+| model_version | str | Which artifact answered (`rnn_lstm_v1`) |
+
+**Model:** `rnn_lstm` (macro-F1 - see [Decisions §7](docs/design/decisions.md) for the full comparison against the other three trained models)
+**Deployed:** local dev - not deployed to a public host
+**Interactive docs:** `http://127.0.0.1:8000/docs` (Swagger UI) or `/redoc` - generated directly from `serving/app.py`'s Pydantic models, so it's always accurate to the actual code, not hand-written documentation that can drift out of sync
+
+### Testing it
+
+Sample `curl` commands and their real, captured responses (health check,
+positive review, negative review, edge cases) are in
+[`serving/README.md`](serving/README.md#endpoints) - copy/paste-ready, no
+extra tool needed:
+
+```bash
+uvicorn serving.app:app --reload --port 8000    # in one terminal
+
+curl http://127.0.0.1:8000/health
+curl -X POST http://127.0.0.1:8000/predict \
+  -H "Content-Type: application/json" \
+  -d '{"text": "The room was clean and the staff were incredibly friendly, best stay ever"}'
+```
+
+The same set of checks (status codes + response shape, for the health check
+and three `/predict` cases) has already been run against the live API and
+saved as a plain-text report:
+[`submission/api_test_results.txt`](submission/api_test_results.txt)
+(11/11 passed).
+
+## Serving API Reflection
+
+**1. What would happen if a new required field were added to `/predict` (e.g. a `language` field)?**
+Add it as *optional*, with a default. That's non-breaking — FastAPI/Pydantic only enforces fields with no default, so every existing caller keeps working. Making it required immediately would break them: anyone still sending the old request shape would start getting `422`s they never got before. Optional first, mandatory later (in a new versioned endpoint like `/v2/predict`) if it truly needs to be required — never change what an existing endpoint expects out from under callers already depending on it. Recorded as policy in [Decisions §13](docs/design/decisions.md).
+
+**2. Is returning a hard failure the right response when the model file is missing at startup?**
+A hard crash was considered and rejected. `serving/app.py` catches the missing-file case at startup (`OSError`/`FileNotFoundError`), logs a warning, and keeps running with `_model = None`. `/health` reports `"model_not_loaded"` instead of a false "all good." `/predict` returns `503`, not `500` — `503` means "temporarily can't handle this, try again," which is accurate here; `500` means "something broke unexpectedly," which isn't. That lets a caller, or an uptime monitor, tell "the API is broken" apart from "the API is up but not ready yet." Full rationale: [Decisions §13](docs/design/decisions.md).
+
+**3. If confidence scores looked suspiciously identical across many different inputs, what would you suspect?**
+The input isn't reaching the model correctly. Possible causes: a bug in `_encode()` producing the same all-padding sequence regardless of the real text, or a stale tensor being reused across requests. To check: feed two clearly different reviews (one positive, one negative) through `/predict` and confirm `probabilities` actually moves. If it doesn't, inspect what `_encode()` outputs for each input before it reaches the model.
+
+**4. If a future model swap ever returned a confidence outside [0.0, 1.0], what happens end to end?**
+`PredictResponse.confidence` is constrained with `Field(..., ge=0.0, le=1.0)` for exactly this case. `/predict` uses `response_model=PredictResponse`, so FastAPI validates the *outgoing* response too, not just incoming requests. An out-of-range value fails that validation, and the caller sees a `500` — a loud failure, not a confidence number that looks valid but isn't.
+
+**5. What's still missing before this could safely serve real production traffic?**
+What's not built, not just what is:
+- **No rate limiting or authentication.** CORS is wide open (`allow_origins=["*"]`), no API key or user auth. Fine for local dev, not for a public endpoint.
+- **No automated retraining pipeline.** [Monitoring](docs/monitoring.md) logs every prediction and can flag when retraining looks justified, but nothing acts on that automatically. Retraining is still a manual `dvc repro --force train_rnn` (see [Decisions §12](docs/design/decisions.md) for why).
+- **No concurrency/load testing.** Every latency number in `serving/README.md` came from sequential, one-at-a-time requests. Untested under real concurrent load, with no request queueing or batching.

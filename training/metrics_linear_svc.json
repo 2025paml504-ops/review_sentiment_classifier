@@ -1,0 +1,41 @@
+{
+  "macro_f1": 0.8651878266677521,
+  "weighted_f1": 0.9390126515100272,
+  "accuracy": 0.9412156122753004,
+  "roc_auc_macro": 0.967070614490887,
+  "roc_auc_weighted": 0.967070614490887,
+  "per_class": {
+    "NEGATIVE": {
+      "precision": 0.8370914175843384,
+      "recall": 0.7025599647913152,
+      "f1": 0.7639481555333998,
+      "support": 13633
+    },
+    "POSITIVE": {
+      "precision": 0.9545648081749731,
+      "recall": 0.9785887407101095,
+      "f1": 0.9664274978021044,
+      "support": 87057
+    }
+  },
+  "confusion_matrix": {
+    "labels": [
+      "NEGATIVE",
+      "POSITIVE"
+    ],
+    "rows_true_cols_pred": [
+      [
+        9578,
+        4055
+      ],
+      [
+        1864,
+        85193
+      ]
+    ]
+  },
+  "model": "linear_svc",
+  "n_train": 402756,
+  "n_test": 100690,
+  "n_features": 20000
+}

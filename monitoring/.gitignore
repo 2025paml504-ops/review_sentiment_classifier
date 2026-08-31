@@ -1,0 +1,6 @@
+# Regenerable local outputs - same convention as feature_store/.gitignore.
+# predictions.db is rebuilt by every /predict call and every simulate_drift
+# run; baseline.json and drift_report.json are rebuilt by their own scripts.
+/predictions.db
+/baseline.json
+/drift_report.json

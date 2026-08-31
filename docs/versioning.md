@@ -6,9 +6,10 @@ Data and model artifacts are versioned with **[DVC](https://dvc.org)**, which
 works alongside git: git tracks small text pointers (`dvc.yaml`, `dvc.lock`,
 `*.dvc`, `.dvcignore`) while the large files (~1.3 GB) live in DVC's cache/remote
 and never enter git history. The whole pipeline is defined as a DVC DAG in
-`dvc.yaml` (`build_features → validate → feature_store → vectorize`), so
-`dvc.lock` records the exact content hash of every artifact — pinning a
-reproducible dataset version to each git commit.
+`dvc.yaml` (`build_features → validate → feature_store → vectorize →
+{train, train_linear_svc, train_rnn, train_transformer}`), so `dvc.lock`
+records the exact content hash of every artifact — pinning a reproducible
+dataset and model version to each git commit.
 
 ## Everyday workflow
 
@@ -28,31 +29,57 @@ Change code/config, run `dvc repro`, then
 
 ## Remote
 
-A default **local** remote named `localremote` is configured in `.dvc/config`:
-
-```
-/Users/sonalgupta/dvc-remotes/review_sentiment_classifier
-```
-
-`dvc push` copies cached artifacts there; `dvc pull` restores them. This path is
-**machine-local** — on another machine either re-point it:
+The default remote is named `localremote`. Only the **name** is git-tracked
+(`.dvc/config`); the **URL is per-machine** and lives in the git-ignored
+`.dvc/config.local`, set once per checkout:
 
 ```bash
-dvc remote modify localremote url <your-path-or-url>
+dvc remote modify --local localremote url <your-path-or-url>
 ```
 
-or swap in a cloud remote (S3/GCS/Azure/SSH) with the same command — the rest of
-the workflow is unchanged.
+`dvc push` copies cached artifacts there; `dvc pull` restores them. Swap in a
+cloud remote (S3/GCS/Azure/SSH) the same way — the rest of the workflow is
+unchanged.
 
 ## Naming convention
 
-The `_v1` suffix (`train_v1.csv`, `tfidf_vectorizer_v1.pkl`) is a human-readable
-label that coexists with DVC's content hashes. Bump to `_v2` when the
-cleaning/tokenization logic, the sentiment labeling thresholds, or the vectorizer
-configuration change. A fitted vectorizer must always be versioned **alongside
-the exact split it was fit on** so training and serving use the same
-vocabulary/IDF.
+The `_v1` suffix (`train_v1.csv`, `tfidf_vectorizer_v1.pkl`, `logreg_v1.pkl`,
+`linear_svc_v1.pkl`, `rnn_lstm_v1.pt`, `bert_tiny_v1/`, …) is a human-readable
+label that coexists with DVC's content hashes — one artifact set per trained
+model, all versioned against the same data contract. Bump to `_v2` when the
+cleaning/tokenization logic, the sentiment labeling thresholds, or the
+vectorizer configuration change. A fitted vectorizer must always be versioned
+**alongside the exact split it was fit on**, and a trained model is only
+valid with the vectorizer it was trained against.
 
 The current **v1 contract** is: Scheme A sentiment thresholds
 (`NEGATIVE < 6`, `6 ≤ NEUTRAL < 8`, `POSITIVE ≥ 8` on `Reviewer_Score`) and the
 column schema in `validation/feature_column.json`.
+
+**Note on v1.5 (this branch).** The contract above is superseded here, not
+just its implementation - sentiment is no longer a `Reviewer_Score`
+threshold at all. Labels are now VADER's compound-score judgment of
+`full_review` text directly (binary: NEGATIVE / POSITIVE, `compound < 0.0`
+vs `>= 0.0`), at the user's explicit request, after manually spot-checking
+score-vs-text disagreements near the old boundary. This is exactly the kind
+of change the naming convention's `_v2` rule is meant to catch - unlike
+v1.1's cleaning-only change, this really does redefine what a label means,
+so artifacts produced under it are `_v2` in spirit even where the filename
+suffix hasn't been renamed yet.
+
+## Version history
+
+| Version | Change | Impact | [Decisions](design/decisions.md) sections |
+|---|---|---|---|
+| **v1** | Cleaning → Scheme A thresholds → TF-IDF fit on train only | Baseline | §1–9 |
+| **1.1** | Contraction expansion, negation attachment, earlier de-dup, cleaning diagnostics | 504,731 rows | §1 |
+| **1.2** | Four training stages + MLflow tracking; two cleaning bug fixes; leaderboard export; `pip freeze` per run | New model artifacts; 503,446 rows after dedup fix | §7, §8, §9–18, most of §10 |
+| **1.3** | Leaderboard ranks by best run, not latest; `mlruns/` documented; RNN epochs re-verified | Docs/tooling only | §10 |
+| **1.4** | `linear_svc` calibration; hypothesis/conclusion tags; served model switched to `rnn_lstm`; Docker + UI added | Serving/UI only; no data-contract change | §7, §10, §11 |
+| **1.5** | Sentiment relabeled with VADER, binary NEGATIVE/POSITIVE; `logreg` weighting reverted after testing; transformer switched to `bert-tiny`; ROC-AUC bug fixed; all four models retrained; API response hardened | Real data-contract change (`_v2` in spirit, see note above); 68,163 NEGATIVE / 435,283 POSITIVE rows | §2, §7, §8, §10 |
+| **1.6** | Added `monitoring/`: prediction logging, a training baseline, a drift simulation (macro-F1 0.89 → 0.76), and four retraining-trigger signals | Monitoring/serving only; no data or model-artifact contract change | §12 |
+
+Experiment tracking (MLflow) and reproducibility are covered in
+[Pipeline](pipeline.md#experiment-tracking), not here — this file is DVC's
+side of versioning specifically; that one covers what happens once a stage
+actually runs.

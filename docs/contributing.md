@@ -7,9 +7,14 @@
 - **Python 3.14** + `venv`
 - **git**
 - **DVC** (installed via `requirements.txt`)
+- **MLflow** (installed via `requirements.txt`) — not optional, every training stage imports it.
 
-All dependencies are open source: `pandas`, `SQLAlchemy` (SQLite), `scikit-learn`,
-and `dvc`.
+All dependencies are open source and declared in `requirements.txt`: `pandas`,
+`numpy`, `SQLAlchemy` (SQLite), `scikit-learn`, `joblib`, `dvc`, `mlflow`,
+plus `kaggle` (optional download helper), and `torch`/`transformers`/
+`datasets`/`accelerate`/`sentencepiece`/`tiktoken` for the transformer
+fine-tune and the recurrent stage (which shares `torch`) — all imported
+lazily, so the rest of the pipeline runs without them.
 
 ```bash
 python3 -m venv .venv
@@ -29,6 +34,9 @@ Match the existing code when adding new work:
 - **Stages are rebuildable**: they read from a `data/` layer (or the feature
   store) and write to the next. `feature_store` and `vectorize` auto-regenerate
   the interim data if it's missing.
+- **Every training run is tracked**: wrap the fit in
+  `training.tracking.start_run(...)` and log parameters, metrics and artifacts
+  through the yielded handle.
 
 ## Common tasks
 
@@ -46,14 +54,62 @@ Match the existing code when adding new work:
 
 ### Change labeling / cleaning / vectorizer config
 1. Make the change in the relevant module.
-2. Bump the artifact version suffix (`_v1` → `_v2`), keeping the vectorizer paired
-   with the split it was fit on.
-3. `dvc repro`, then commit the lock + pointer files. See [Versioning](versioning.md).
+2. Bump the artifact version suffix (`_v1` → `_v2`) if the schema, the labeling
+   scheme, or the vectorizer config changed, keeping the vectorizer paired with
+   the split it was fit on. A cleaning-only change keeps the suffix.
+3. Add a row to the [version history](versioning.md#version-history) table
+   describing the change and its impact on downstream artifacts.
+4. `dvc repro` (this re-fits the vectorizer — required whenever the cleaning
+   changes the vocabulary), then commit the lock + pointer files.
+   See [Versioning](versioning.md).
+5. For a cleaning change, run `python -m validation.diagnose_cleaning` on the
+   rebuilt interim CSV — it reports the known cleaning defects with counts and
+   examples. Every check should print `[OK]`; a `[ISSUE]` line names the fix
+   it expects.
+
+### Add a model or change hyperparameters
+1. Add the estimator to `MODELS` in `training/train_linear.py`, edit
+   `training/train_rnn.py`, or edit `training/train_transformer.py`.
+2. Log the change: hyperparameters into `params`, new scores into `metrics`,
+   new files through `run.log_artifact(...)`. Anything not logged is
+   invisible in the comparison.
+3. Only the default model writes the DVC-tracked `training/metrics_logreg.json`; a
+   comparison run writes `training/metrics_<model>.json`.
+4. Run the trainer, then compare against previous runs in
+   `mlflow ui --backend-store-uri sqlite:///mlflow.db` on macro-F1 before
+   promoting anything to the default.
+5. A new model **family** needs its own module, its own DVC stage, and its
+   own `training/metrics_<family>.json` metric (`cache: false`).
+
+### Change which model gets served, or edit the API/UI
+1. Whatever model you're switching to must already have a metrics file to
+   compare against the others on macro-F1 (§8) - see the recipe above.
+2. Edit `serving/app.py`: model loading at startup, and the inference code
+   in `predict()` if the new model's input/output shape differs from the
+   current one (a HuggingFace model and a plain PyTorch checkpoint, for
+   example, load and run differently).
+3. Update `serving/requirements.txt` and the `Dockerfile`'s `COPY` lines to
+   match whatever the new model actually needs at runtime - not the full
+   root `requirements.txt`.
+4. Test it before committing: start the API (`uvicorn serving.app:app
+   --reload --port 8000`) and hit `/health` and `/predict` with curl, or use
+   the FastAPI docs at `/docs`. Check the edge cases in
+   [serving/README.md](../serving/README.md) still return `422`, not a
+   crash.
+5. `ui/index.html` only talks to `/predict`'s existing request/response
+   shape - it doesn't need changes unless that shape itself changed.
+6. Record the change in [Decisions §7](design/decisions.md) - which model,
+   why, and what it cost (latency, dependencies) compared to the alternative.
 
 ## Before you commit
 
 - [ ] `dvc repro` (or at least `python -m validation.validate_data`) passes green.
+- [ ] If you touched cleaning: `python -m validation.diagnose_cleaning` reports
+      `[OK]` for every check.
+- [ ] If you touched training: the run shows up in `mlflow ui` with its
+      parameters, metrics and artifacts.
 - [ ] Commit `dvc.lock` and any `*.dvc` pointer files **with** the code change.
-- [ ] Do **not** commit files under `data/`, `feature_store/*.db`, or
-      `model_store/*` — these are DVC-tracked and git-ignored.
+- [ ] Do **not** commit files under `data/`, `feature_store/*.db`,
+      `model_store/*`, `mlflow.db`, `mlruns/` or `mlartifacts/` — these are
+      DVC-tracked or regenerable, and git-ignored.
 - [ ] `dvc push` if you have access to a shared remote.

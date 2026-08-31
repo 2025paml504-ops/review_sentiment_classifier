@@ -1,0 +1,41 @@
+{
+  "macro_f1": 0.8917502469053284,
+  "weighted_f1": 0.9462917071747607,
+  "accuracy": 0.9434303307180455,
+  "roc_auc_macro": 0.9848856839496377,
+  "roc_auc_weighted": 0.9848856839496377,
+  "per_class": {
+    "NEGATIVE": {
+      "precision": 0.7269659708321419,
+      "recall": 0.9323699845962004,
+      "f1": 0.8169548171476316,
+      "support": 13633
+    },
+    "POSITIVE": {
+      "precision": 0.9889189351601466,
+      "recall": 0.9451623648873726,
+      "f1": 0.9665456766630253,
+      "support": 87057
+    }
+  },
+  "confusion_matrix": {
+    "labels": [
+      "NEGATIVE",
+      "POSITIVE"
+    ],
+    "rows_true_cols_pred": [
+      [
+        12711,
+        922
+      ],
+      [
+        4774,
+        82283
+      ]
+    ]
+  },
+  "model": "rnn_lstm",
+  "n_train": 402756,
+  "n_test": 100690,
+  "n_features": 20002
+}
