@@ -65,12 +65,26 @@ services:
     # model_store/ path (= /app/model_store), which is the shared volume, so the
     # api and monitor read the same file. This default path is also dvc's declared
     # output, so `dvc repro train_rnn` works here too.
-    command: python -m training.train_rnn
+    command: >
+      sh -c '
+        ensure_tfidf() {
+          [ -f model_store/tfidf_vectorizer_v1.pkl ] && return 0;
+          echo "[trainer] TF-IDF missing - building features first...";
+          python -m features.build_features &&
+          python -m feature_store.feature_store &&
+          python -m features.vectorize;
+        }
+        case "${MODEL:-rnn_lstm}" in
+          rnn_lstm|rnn_bilstm|rnn_simple)
+            python -m training.train_rnn --arch "${MODEL}" ;;
+          logreg|linear_svc)
+            ensure_tfidf && python -m training.train_linear --model "${MODEL}" ;;
+          *) echo "unknown MODEL=${MODEL}"; exit 1 ;;
+        esac'
     environment:
-      # 'mlflow' is the SERVICE NAME - Docker's internal DNS resolves it.
       MLFLOW_TRACKING_URI: http://mlflow:5000
-      # No ARTIFACT_DIR anywhere: every service uses the code's default
-      # model_store/ path mounted from the shared volume - one consistent path.
+      MODEL: "rnn_lstm"   # rnn_lstm | rnn_bilstm | rnn_simple | logreg | linear_svc
+      # volumes (./data + model_store:/app/model_store) and depends_on unchanged
     volumes:
       - ./data:/app/data              # raw CSV in, intermediates out (read-write)
       - model_store:/app/model_store  # model lands here; api + monitor read it here too
