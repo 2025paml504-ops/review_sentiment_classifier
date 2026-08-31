@@ -1,0 +1,20 @@
+# Runtime deps for the Dockerized services only: the mlflow tracking client,
+# the rnn_lstm trainer chain, the FastAPI api, and the monitor. Deliberately
+# LEANER than the root requirements.txt - it drops what these containers never
+# import: the transformer-training stack (transformers/datasets/accelerate/
+# sentencepiece/tiktoken), dvc, and kaggle, plus their heavy transitive deps
+# (pyarrow, tokenizers, huggingface-hub, pygit2, ...). That is the bulk of the
+# build time and image size. The full stack still lives in requirements.txt for
+# host use (transformer training, `dvc repro`).
+#
+# torch is installed separately from the CPU wheel index in the Dockerfile.
+# Versions are pinned to match requirements.txt exactly.
+pandas==2.3.3
+numpy==2.5.2
+SQLAlchemy==2.0.52
+scikit-learn==1.9.0
+joblib==1.5.3
+vaderSentiment==3.3.2
+mlflow==3.15.1
+fastapi==0.141.1
+uvicorn==0.52.1

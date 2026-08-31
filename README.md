@@ -71,6 +71,19 @@ Then, to run the API and the UI (needs `rnn_lstm` from the step above):
 
 Open `http://localhost:8090/index.html`. Details: [serving/README.md](serving/README.md).
 
+Or run the whole lifecycle in containers - `mlflow` (5001), a one-shot
+`trainer`, the `api` (8000), a one-shot `monitor`, and an optional `ui` (8090),
+all off one shared image:
+
+```bash
+docker compose up -d mlflow
+docker compose run --rm trainer      # trains + logs; writes the model to a volume
+docker compose up -d api ui
+docker compose run --rm monitor
+```
+
+Details: [serving/README.md](serving/README.md#with-docker-compose-full-lifecycle).
+
 Alongside that, `http://127.0.0.1:8000/docs` (Swagger UI) gives an
 interactive, always-accurate view of the API itself - generated directly
 from `serving/app.py`, useful for testing requests/responses without

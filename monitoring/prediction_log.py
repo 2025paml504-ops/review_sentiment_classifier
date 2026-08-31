@@ -15,13 +15,17 @@ get mixed into the same "current production traffic" window by mistake.
 """
 
 import datetime as dt
+import os
 import uuid
 from pathlib import Path
 
 from sqlalchemy import create_engine, text
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
-LOG_PATH = REPO_ROOT / "monitoring" / "predictions.db"
+# The prediction log's location. Defaults to monitoring/predictions.db so host
+# runs are unchanged; PREDICTION_LOG lets the api (writer) and monitor (reader)
+# containers share one file on the /app/artifacts volume.
+LOG_PATH = Path(os.environ.get("PREDICTION_LOG", REPO_ROOT / "monitoring" / "predictions.db"))
 TABLE_NAME = "predictions"
 
 

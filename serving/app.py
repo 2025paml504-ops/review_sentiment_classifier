@@ -31,6 +31,7 @@ Then:
 
 import json
 import logging
+import os
 import time
 from pathlib import Path
 
@@ -58,8 +59,12 @@ MODEL_NAME = "rnn_lstm"
 # caller can tell two deployments apart without reading logs. Update this
 # whenever the served artifact changes (decisions.md §22).
 MODEL_VERSION = "rnn_lstm_v1"
-MODEL_PATH = REPO_ROOT / "model_store" / "rnn_lstm_v1.pt"
-VOCAB_PATH = REPO_ROOT / "model_store" / "rnn_lstm_v1_vocab.json"
+# Where the model artifacts live. Defaults to the repo's model_store/ so host
+# runs are unchanged; ARTIFACT_DIR points the container at the shared
+# /app/artifacts volume the trainer wrote to.
+_ARTIFACT_DIR = Path(os.environ.get("ARTIFACT_DIR", REPO_ROOT / "model_store"))
+MODEL_PATH = _ARTIFACT_DIR / "rnn_lstm_v1.pt"
+VOCAB_PATH = _ARTIFACT_DIR / "rnn_lstm_v1_vocab.json"
 
 # These must match training/train_rnn.py exactly - they describe the shape
 # of the saved weights, not a preference. Duplicated here rather than

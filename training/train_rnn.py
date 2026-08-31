@@ -44,6 +44,7 @@ Run it:
 import argparse
 import json
 import logging
+import os
 from collections import Counter
 from pathlib import Path
 
@@ -58,7 +59,10 @@ logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
 logger = logging.getLogger("train_rnn")
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
-MODEL_STORE = REPO_ROOT / "model_store"
+# Where the fitted model is written. Defaults to the repo's model_store/ so
+# host runs are unchanged; ARTIFACT_DIR lets the Docker trainer redirect the
+# output to the shared /app/artifacts volume the api reads from.
+MODEL_STORE = Path(os.environ.get("ARTIFACT_DIR", REPO_ROOT / "model_store"))
 METRICS_DIR = Path(__file__).resolve().parent
 
 

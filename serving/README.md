@@ -12,15 +12,45 @@ that raised its accuracy but lowered its macro-F1.
 ```bash
 # locally, from the repo root (needs the full requirements.txt installed)
 uvicorn serving.app:app --reload --port 8000
-
-# or via Docker
-docker build -t review-sentiment-api .
-docker run -p 8000:8000 review-sentiment-api
 ```
 
-Either way, `model_store/rnn_lstm_v1.pt` and `model_store/rnn_lstm_v1_vocab.json`
-need to already exist. Run `dvc repro train_rnn` first if they don't (see
-[Pipeline](../docs/pipeline.md)).
+Run locally, `model_store/rnn_lstm_v1.pt` and `model_store/rnn_lstm_v1_vocab.json`
+need to already exist - run `dvc repro train_rnn` first if they don't (see
+[Pipeline](../docs/pipeline.md)). Under Docker Compose (below) the `trainer`
+service produces them for you.
+
+### With Docker Compose (full lifecycle)
+
+`docker-compose.yaml` at the repo root runs the whole ML lifecycle as services
+off **one shared image** (`review-sentiment/ml-pipeline`), each differentiated
+by its `command`, plus an optional nginx `ui`:
+
+| Service   | Type         | URL / role                                          |
+| --------- | ------------ | --------------------------------------------------- |
+| `mlflow`  | long-running | http://localhost:5001 - experiment tracking server  |
+| `trainer` | one-shot     | runs the pipeline, logs to mlflow, writes the model |
+| `api`     | long-running | http://localhost:8000/docs - inference              |
+| `monitor` | one-shot     | drift report over the prediction log                |
+| `ui`      | long-running | http://localhost:8090/ - static page (optional)     |
+
+The services hand artifacts to each other through named volumes: `trainer`
+writes the model to `model_store:/app/artifacts`, which `api` and `monitor`
+read; `mlflow_data:/mlflow` holds the tracking db + artifacts. Paths are set per
+service with `ARTIFACT_DIR` / `PREDICTION_LOG` env vars (the code defaults to the
+repo's `model_store/` and `monitoring/` when they're unset, so host runs are
+unchanged).
+
+```bash
+docker compose up -d mlflow          # start the tracking server
+docker compose run --rm trainer      # train + log; writes model to the volume
+docker compose up -d api ui          # serve the API (+ UI)
+docker compose run --rm monitor      # drift report over logged predictions
+
+docker compose logs -f api           # any service's logs (all log to stdout)
+```
+
+The UI calls the API from the browser at `http://127.0.0.1:8000/predict`, which
+works cross-origin because `app.py` enables permissive CORS.
 
 Once it's running, `http://127.0.0.1:8000/docs` (Swagger UI) or `/redoc`
 gives an interactive, always-accurate view of the request/response
